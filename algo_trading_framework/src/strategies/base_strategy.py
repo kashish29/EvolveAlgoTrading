@@ -1,95 +1,49 @@
+import logging
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
-import pandas as pd
+from typing import TYPE_CHECKING, Dict
 
-# Assuming core.models and core.enums are accessible for Signal and TradeType
-# Adjust import path if necessary based on actual project structure
-try:
-    from algo_trading_framework.src.core.models import Signal, Candle
-    from algo_trading_framework.src.core.enums import TradeType, OrderType
-except ImportError:
-    print("Warning: Core models/enums not found at expected location during base_strategy.py load. Ensure PYTHONPATH.")
-    # Define dummy classes if imports fail, for basic script integrity if run standalone (not recommended for framework use)
-    class Signal: pass 
-    class Candle: pass
-    class TradeType: BUY="BUY"; SELL="SELL"
-    class OrderType: MARKET="MARKET"
-
+if TYPE_CHECKING: # pragma: no cover
+    from src.broker_api.base_broker_client import BaseBrokerClient # type: ignore
+    from src.core.models import Candle # type: ignore
 
 class BaseStrategy(ABC):
-    """
-    Abstract base class for all trading strategies.
-    Concrete strategies must implement the on_bar method.
-    """
-    def __init__(self, strategy_name: str, params: Dict[str, Any]):
-        """
-        Initializes the base strategy.
-
-        Args:
-            strategy_name (str): A descriptive name for the strategy.
-            params (Dict[str, Any]): A dictionary of parameters for the strategy
-                                     (e.g., {"short_window": 20, "long_window": 50}).
-        """
-        self.strategy_name = strategy_name
-        self.params = params
-        self.data_history = pd.DataFrame() # To store historical data for calculations
-        print(f"Strategy '{self.strategy_name}' initialized with parameters: {self.params}")
+    def __init__(self, strategy_id: str, broker: 'BaseBrokerClient', config: dict = None):
+        self.strategy_id = strategy_id
+        self.broker = broker # Instance of a class implementing BaseBrokerClient
+        self.config = config or {}
+        
+        # Basic logging setup for the strategy
+        self.logger = logging.getLogger(f"strategy.{self.strategy_id}")
+        if not self.logger.handlers: # Avoid duplicate handlers if logger already configured
+            # Default handler if no specific logging configuration is set up elsewhere
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+            self.logger.setLevel(logging.INFO) # Default level
+        self.logger.info(f"Strategy {self.strategy_id} initialized.")
 
     @abstractmethod
-    def on_bar(self, current_candle: Candle, historical_data: Optional[pd.DataFrame] = None) -> Optional[Signal]:
+    def on_bar(self, current_bars: Dict[str, 'Candle']):
         """
-        Called on each new market data bar (candle).
-        This is where the strategy logic to generate trading signals resides.
-
-        Args:
-            current_candle (Candle): The most recent candle data.
-            historical_data (Optional[pd.DataFrame]): A DataFrame of historical candle data
-                                                     available up to (but not including) the current_candle.
-                                                     Useful for indicator calculations that require a lookback period.
-                                                     The DataFrame should have columns like ['timestamp', 'open', 'high', 'low', 'close', 'volume'].
-
-        Returns:
-            Optional[Signal]: A Signal object if a trading signal is generated, otherwise None.
+        Called by the backtesting engine or live trading system on each new bar.
+        
+        :param current_bars: A dictionary mapping symbol strings to Candle objects 
+                             representing the current market data for subscribed symbols.
         """
         pass
 
-    def update_historical_data(self, new_candle_data: Candle):
-        """
-        Updates the internal historical data store with the new candle.
-        This is a helper that can be called by the backtesting engine or live trader
-        before calling on_bar, if the strategy relies on on_bar's historical_data argument.
-        Alternatively, strategies can manage their own history internally if preferred.
-        
-        Args:
-            new_candle_data (Candle): The new candle to add.
-        """
-        candle_dict = {
-            'timestamp': new_candle_data.timestamp,
-            'open': new_candle_data.open,
-            'high': new_candle_data.high,
-            'low': new_candle_data.low,
-            'close': new_candle_data.close,
-            'volume': new_candle_data.volume,
-            'symbol': new_candle_data.symbol,
-            'timeframe': new_candle_data.timeframe
-        }
-        # Use pd.concat instead of append for efficiency
-        new_row_df = pd.DataFrame([candle_dict])
-        if self.data_history.empty:
-            self.data_history = new_row_df
-        else:
-            self.data_history = pd.concat([self.data_history, new_row_df], ignore_index=True)
-        
-        # Optional: Limit history size to prevent memory issues
-        # max_history_length = self.params.get("max_history_length", 1000) # Example parameter
-        # if len(self.data_history) > max_history_length:
-        #     self.data_history = self.data_history.iloc[-max_history_length:]
-
-    def get_historical_data_for_on_bar(self) -> pd.DataFrame:
-        """
-        Returns the historical data collected so far, for use in on_bar.
-        Excludes the very last row, as that would be the 'current_candle' data.
-        """
-        if len(self.data_history) > 1:
-            return self.data_history.iloc[:-1].copy()
-        return pd.DataFrame() # Return empty if not enough data
+    # Optional helper methods can be added here
+    # Example:
+    # def place_market_order(self, symbol: str, quantity: int, side: 'OrderSide') -> tuple[str, str]:
+    #     from src.core.models import Order, OrderType # Local import to avoid circular issues at module level
+    #     order = Order(
+    #         id=None, # Broker will assign
+    #         symbol=symbol,
+    #         quantity=quantity,
+    #         side=side,
+    #         order_type=OrderType.MARKET
+    #     )
+    #     order_id, status = self.broker.place_order(order)
+    #     self.logger.info(f"Placed {side.value} {OrderType.MARKET.value} order for {quantity} {symbol}: {order_id} - Status: {status}")
+    #     return order_id, status
