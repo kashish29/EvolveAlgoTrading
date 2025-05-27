@@ -1,217 +1,147 @@
-# algo_trading_framework/src/main.py
+import datetime
+import logging
 
-from datetime import datetime, timedelta
-import pandas as pd
-import os # For path joining
-import logging # Added for potential direct logger level setting
+# Assuming project structure src/data, src/core, etc.
+# Adjusted import path for HistoricalDataManager
+from src.data_handler.historical_data_manager import HistoricalDataManager
+from src.broker_api.mock_fyers_client import MockFyersClient
+from src.strategies.example_moving_average_cross_strategy import ExampleMovingAverageCrossStrategy
+from src.backtester.engine import BacktesterEngine
+from src.core.models import Candle, Timeframe # OrderSide, OrderType are used within strategy/broker
 
-# Core components
-from algo_trading_framework.src.core.models import Candle # Used by Backtester
-from algo_trading_framework.src.core.enums import TradeType # Used by Strategy & Backtester
-
-# Broker API (Mock)
-from algo_trading_framework.src.broker_api.fyers_client import MockFyersClient
-
-# Data Handler
-from algo_trading_framework.src.data_handler.historical_data_manager import HistoricalDataManager
-
-# Strategies
-from algo_trading_framework.src.strategies.example_strategy import ExampleMovingAverageCrossStrategy
-
-# Backtester
-from algo_trading_framework.src.backtester.engine import BacktestEngine
-
-# Utilities
-from algo_trading_framework.src.utils.config_loader import load_config
-from algo_trading_framework.src.utils.logger import get_logger
-
-# Strategy Lab (Mock Components)
-from algo_trading_framework.src.strategy_lab.llm_interface import MockLLMInterface
-from algo_trading_framework.src.strategy_lab.fitness_evaluator import MockFitnessEvaluator
-from algo_trading_framework.src.strategy_lab.evolutionary_engine import MockEvolutionaryEngine
-from algo_trading_framework.src.strategy_lab.strategy_generator import StrategyGenerator
-
-# --- Configuration ---
-# Get the directory of the current script to build relative paths
-# Correct BASE_DIR to point to the 'algo_trading_framework' directory if main.py is in 'src'
-CURRENT_FILE_DIR = os.path.dirname(os.path.abspath(__file__)) # .../algo_trading_framework/src
-BASE_DIR = os.path.dirname(CURRENT_FILE_DIR) # .../algo_trading_framework
-CONFIG_DIR = os.path.join(BASE_DIR, "config") # .../algo_trading_framework/config/
-STRATEGY_CONFIG_PATH = os.path.join(CONFIG_DIR, "strategy_params", "example_strategy.yaml")
-
-
-# --- Setup Logger ---
-main_logger = get_logger(__name__, log_level=logging.INFO) # Set default level to INFO for main script
-
-def run_example_backtest():
-    """
-    Runs a backtest for the ExampleMovingAverageCrossStrategy using mock data.
-    """
-    main_logger.info("--- Starting Example Strategy Backtest ---")
-
-    # 1. Initialize Mock Broker Client
-    mock_broker = MockFyersClient(client_id="main_demo_client", token="main_demo_token")
-    if not mock_broker.connect():
-        main_logger.error("Failed to connect mock broker for backtest. Exiting backtest demo.")
-        return
-
-    # 2. Initialize Data Handler
-    data_manager = HistoricalDataManager(broker_client=mock_broker)
-
-    # 3. Fetch Mock Historical Data
-    symbol = "MOCK_XYZ-EQ" 
-    timeframe = "1D" 
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=200) 
-
-    main_logger.info(f"Fetching mock historical data for {symbol} from {start_date.date()} to {end_date.date()}...")
-    historical_df = data_manager.fetch_historical_data(symbol, timeframe, start_date, end_date)
-
-    if historical_df is None or historical_df.empty:
-        main_logger.error(f"Failed to fetch mock historical data for {symbol}. Exiting backtest demo.")
-        return
-    main_logger.info(f"Successfully fetched {len(historical_df)} bars of mock data.")
-
-    # 4. Load Strategy Configuration
-    try:
-        strategy_params_full = load_config(STRATEGY_CONFIG_PATH)
-        strategy_constructor_params = {
-            "short_window": strategy_params_full.get("short_window", 10),
-            "long_window": strategy_params_full.get("long_window", 20),
-            "symbol": symbol 
-        }
-        strategy_name = strategy_params_full.get("strategy_name", "ExampleMovingAverageCross")
-
-    except FileNotFoundError:
-        main_logger.warning(f"Strategy config file not found at {STRATEGY_CONFIG_PATH}. Using default parameters.")
-        strategy_constructor_params = {"short_window": 10, "long_window": 20, "symbol": symbol}
-        strategy_name = "ExampleMovingAverageCross_Default"
-    except Exception as e:
-        main_logger.error(f"Failed to load or parse strategy configuration from {STRATEGY_CONFIG_PATH}: {e}")
-        main_logger.warning("Using default parameters for ExampleMovingAverageCrossStrategy.")
-        strategy_constructor_params = {"short_window": 10, "long_window": 20, "symbol": symbol}
-        strategy_name = "ExampleMovingAverageCross_Default"
-
-
-    # 5. Initialize Strategy
-    main_logger.info(f"Initializing strategy '{strategy_name}' with params: {strategy_constructor_params}")
-    example_strategy = ExampleMovingAverageCrossStrategy(
-        strategy_name=strategy_name,
-        params=strategy_constructor_params
-    )
-
-    # 6. Initialize Backtest Engine
-    initial_capital = 100000.0
-    commission_per_trade = 0.05 
-    main_logger.info(f"Initializing BacktestEngine with initial capital ${initial_capital:,.2f} "
-                     f"and commission ${commission_per_trade:.2f} per unit.")
-    backtester = BacktestEngine(
-        strategy_instance=example_strategy,
-        historical_data=historical_df, 
-        initial_capital=initial_capital,
-        commission_per_trade=commission_per_trade
-    )
-
-    # 7. Run Backtest
-    main_logger.info("Starting backtest run...")
-    performance_summary = backtester.run()
-
-    # 8. Print Performance Summary
-    main_logger.info("--- Backtest Performance Summary ---")
-    if performance_summary:
-        for key, value in performance_summary.items():
-            if isinstance(value, float):
-                main_logger.info(f"{key}: {value:,.2f}")
-            else:
-                main_logger.info(f"{key}: {value}")
-    else:
-        main_logger.error("Backtest did not return a performance summary.")
-    
-    main_logger.info("--- End of Example Strategy Backtest ---")
-
-
-def demonstrate_strategy_lab():
-    """
-    Demonstrates the mock functionality of the Strategy Lab components.
-    """
-    main_logger.info("\n--- Starting Strategy Lab Demonstration ---")
-
-    # 1. Initialize Mock Components
-    llm_interface = MockLLMInterface(model_name="demo_llm_v0.1")
-    fitness_evaluator = MockFitnessEvaluator()
-    evolutionary_engine = MockEvolutionaryEngine(llm_interface=llm_interface) 
-
-    # 2. Initialize Strategy Generator
-    strategy_generator = StrategyGenerator(
-        llm_interface=llm_interface,
-        fitness_evaluator=fitness_evaluator,
-        evolutionary_engine=evolutionary_engine,
-        population_size=3 
-    )
-
-    # 3. Generate Initial Population
-    main_logger.info("Generating initial strategy population using MockLLMInterface...")
-    strategy_generator.generate_initial_population(
-        base_prompt="Develop a breakout strategy for volatile tech stocks."
-    )
-    
-    main_logger.info("\nInitial Population (Code Snippets & Mock Fitness):")
-    if strategy_generator.current_population_codes and strategy_generator.current_fitness_scores:
-        for i, code in enumerate(strategy_generator.current_population_codes):
-            # Check if index is within bounds for fitness_scores
-            if i < len(strategy_generator.current_fitness_scores):
-                 fitness = strategy_generator.current_fitness_scores[i]
-                 main_logger.info(f"Strategy {i+1} (Fitness: {fitness:.2f}):\n{code[:200]}...\n")
-            else:
-                 main_logger.warning(f"Strategy {i+1} code found, but missing fitness score.")
-    else:
-        main_logger.warning("No initial population or fitness scores were generated/available.")
-
-    # 4. Run a Mock Evolution Cycle
-    num_mock_generations = 1 
-    main_logger.info(f"\nRunning mock evolution for {num_mock_generations} generation(s)...")
-    strategy_generator.run_evolution_cycle(num_generations=num_mock_generations)
-
-    # 5. Get and Display the "Best" Strategy Found (based on mock fitness)
-    main_logger.info("\n--- Mock Best Strategy from Strategy Lab ---")
-    best_strategy_info = strategy_generator.get_best_strategy()
-    if best_strategy_info:
-        best_code, best_fitness = best_strategy_info
-        main_logger.info(f"Best strategy code (mock fitness: {best_fitness:.2f}):")
-        main_logger.info(best_code) 
-    else:
-        main_logger.warning("Could not determine a 'best' strategy from the mock lab.")
-
-    main_logger.info("--- End of Strategy Lab Demonstration ---")
-
+# Basic Logging Configuration
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler() # Ensure logs go to console
+    ]
+)
 
 if __name__ == "__main__":
-    main_logger.info("===== Algorithmic Trading Framework Demonstration =====")
-    
-    # Create dummy config if it doesn't exist to prevent FileNotFoundError on first run
-    if not os.path.exists(STRATEGY_CONFIG_PATH):
-        main_logger.warning(f"Strategy config {STRATEGY_CONFIG_PATH} not found. Creating a dummy one for demo.")
-        if not os.path.exists(os.path.dirname(STRATEGY_CONFIG_PATH)):
-            os.makedirs(os.path.dirname(STRATEGY_CONFIG_PATH))
-        dummy_cfg_content = {
-            "strategy_name": "ExampleMovingAverageCrossFromDummy",
-            "short_window": 12,
-            "long_window": 22,
-            "symbol": "MOCK_DUMMY-EQ" # This will be overridden by `symbol` in run_example_backtest
-        }
-        try:
-            with open(STRATEGY_CONFIG_PATH, 'w') as f:
-                import yaml # Temporary import for this setup
-                yaml.dump(dummy_cfg_content, f)
-            main_logger.info(f"Dummy config created at {STRATEGY_CONFIG_PATH}")
-        except Exception as e:
-            main_logger.error(f"Could not create dummy config: {e}")
+    logger = logging.getLogger(__name__) # Logger for main execution
+
+    # a. Setup Parameters
+    symbol = "SBIN_NSE"
+    start_date = datetime.datetime(2023, 1, 1)
+    end_date = datetime.datetime(2023, 1, 31) # Using a 31-day period
+    # Timeframe for data generation and strategy (ensure consistency)
+    data_timeframe = Timeframe.DAY_1 
+    initial_cash = 100000.0
+    commission_rate_broker = 0.0007 # Example commission
+
+    logger.info(f"Setting up backtest for {symbol} from {start_date.date()} to {end_date.date()} with {data_timeframe.value} timeframe.")
+
+    # b. Prepare Historical Data (Sample Daily Data)
+    sample_candles: list[Candle] = []
+    current_date = start_date
+    days_generated = 0
+    base_open = 100.0
+    while current_date <= end_date and days_generated < 31: # Generate up to 31 candles or until end_date
+        # Simple price movement for MA crossover
+        open_price = base_open + days_generated * 0.5
+        close_price = base_open + days_generated * 0.5 - (days_generated % 5) + 2 # Creates some up/down for MA
+        if days_generated > 10 and days_generated < 20 : # dip
+             close_price = base_open + days_generated * 0.5 - (days_generated % 3) - 5
+        if days_generated > 20 : # recovery
+            close_price = base_open + days_generated * 0.5 + (days_generated % 2) + 3
 
 
-    run_example_backtest()
+        sample_candles.append(Candle(
+            timestamp=current_date,
+            symbol=symbol,
+            open=open_price,
+            high=open_price + 2.0, # Simplified high
+            low=open_price - 2.0,   # Simplified low
+            close=close_price,
+            volume=10000 + days_generated * 100,
+            timeframe=data_timeframe 
+        ))
+        current_date += datetime.timedelta(days=1)
+        days_generated +=1
     
-    main_logger.info("\n" + "="*50 + "\n")
+    if not sample_candles:
+        logger.error("No sample candles generated. Exiting.")
+        exit()
+        
+    data_feeds = {symbol: sample_candles}
+    logger.info(f"Generated {len(sample_candles)} sample candles for {symbol}.")
+
+    # c. Instantiate Components
+    hdm = HistoricalDataManager()
+    hdm.load_data(data_feeds) # Load data into HDM
     
-    demonstrate_strategy_lab()
+    # Pass HDM to broker if broker needs direct access to historical data (e.g. for fills)
+    # MockFyersClient current implementation of place_order for MARKET uses its own historical_data if symbol not in current_bars
+    # or get_current_bar.close(). It might be more robust to pass the HDM instance to the broker,
+    # but current MockFyersClient historical_data is a dict or an object with get_data.
+    # For simplicity, MockFyersClient was modified to accept historical_data, which can be an HDM.
+    broker = MockFyersClient(
+        historical_data=hdm, # Pass the HDM instance
+        initial_cash=initial_cash, 
+        commission_rate=commission_rate_broker
+    )
+    broker.connect() # Connect the broker
+
+    strategy_config = {
+        "symbol": symbol, 
+        "short_window": 5, 
+        "long_window": 10, 
+        "quantity": 10,
+        "timeframe": data_timeframe # Strategy might use this for context or internal logic
+    }
+    strategy = ExampleMovingAverageCrossStrategy(
+        strategy_id="MA_Cross_1", 
+        broker=broker, 
+        config=strategy_config
+    )
     
-    main_logger.info("\n===== End of Demonstration =====")
+    # Engine uses timeframe for its own context if needed, but primarily relies on HDM's sorted data
+    engine = BacktesterEngine(
+        strategy=strategy, 
+        broker=broker, 
+        historical_data_manager=hdm, 
+        symbols_to_trade=[symbol], 
+        timeframe=data_timeframe.value, # Pass string value of timeframe
+        start_date=start_date, 
+        end_date=end_date
+    )
+
+    # d. Run Backtest
+    logger.info("Starting backtest engine...")
+    equity_curve, portfolio_history = engine.run()
+    logger.info("Backtest engine finished.")
+
+    # e. Print Results
+    if equity_curve:
+        logger.info(f"Final Portfolio Value: {equity_curve[-1]:.2f}")
+    else:
+        logger.info(f"Final Portfolio Value (no trades or activity): {initial_cash:.2f}")
+
+    logger.info("Trade Log:")
+    trade_log = broker.get_trade_history() # This returns a list of trade dicts
+    if trade_log:
+        for trade in trade_log:
+            # Assuming trade is a dictionary as per MockFyersClient
+            trade_info = (
+                f"TradeID: {trade.get('trade_id')}, OrderID: {trade.get('order_id')}, Symbol: {trade.get('symbol')}, "
+                f"Side: {trade.get('side')}, Qty: {trade.get('quantity')}, Price: {trade.get('price', 0.0):.2f}, "
+                f"Comm: {trade.get('commission', 0.0):.2f}, TS: {trade.get('timestamp')}"
+            )
+            logger.info(f"  {trade_info}")
+    else:
+        logger.info("  No trades executed.")
+
+    logger.info("Portfolio History Snapshots (last 5):")
+    for snapshot in portfolio_history[-5:]:
+        # Snapshot is a dictionary from BacktesterEngine
+        snap_info = (
+            f"TS: {snapshot.get('timestamp')}, Cash: {snapshot.get('cash', 0.0):.2f}, "
+            f"PositionsVal: {snapshot.get('positions_market_value', 0.0):.2f}, TotalVal: {snapshot.get('total_value', 0.0):.2f}"
+        )
+        logger.info(f"  {snap_info}")
+        for sym, pos_details in snapshot.get('positions', {}).items():
+            logger.info(f"    {sym}: Qty={pos_details.get('qty')}, AvgP={pos_details.get('avg_price', 0.0):.2f}, LastP={pos_details.get('last_price', 0.0):.2f}, MktVal={pos_details.get('market_value', 0.0):.2f}")
+
+    broker.disconnect() # Disconnect the broker
+    logger.info("Main execution finished.")
