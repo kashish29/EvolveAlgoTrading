@@ -2,9 +2,10 @@ import unittest
 from datetime import datetime
 import uuid # For generating unique IDs for tests
 
-from src.core.models import Candle, Signal, Order, Trade, Position
-# Import all enums that are actually used in this test file
-from src.core.enums import OrderType, OrderStatus, TradeType, InstrumentType, OrderSide, Timeframe 
+from src.core.models import (
+    Candle, Signal, Order, Trade, Position,
+    OrderType, OrderStatus, OrderSide, Timeframe, InstrumentType
+)
 
 class TestCoreModels(unittest.TestCase):
 

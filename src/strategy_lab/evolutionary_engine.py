@@ -492,5 +492,3 @@ if __name__ == '__main__':
     if engine._get_param_from_code(strat_mutate_lw, "short_window") == sw_mut_lw and sw_mut_lw is not None and lw_mut_lw is not None: # if SW wasn't mutated
          assert sw_mut_lw < lw_mut_lw, f"Mutate LW Constraint failed: SW={sw_mut_lw} not less than LW={lw_mut_lw}"
     print("--- Mutate edge case test complete ---")
-
-[end of src/strategy_lab/evolutionary_engine.py]

@@ -3,8 +3,8 @@ from datetime import datetime, timedelta
 import time
 import random
 from typing import List, Dict, Optional, Any
-from algo_trading_framework.src.core.models import Order, Candle, Position
-from algo_trading_framework.src.core.enums import OrderStatus, TradeType, InstrumentType, OrderType
+from src.core.models import Order, Candle, Position
+from src.core.enums import OrderStatus, TradeType, InstrumentType, OrderType
 
 class MockFyersClient:
     def __init__(self, client_id: str, token: str, log_path: str = "logs/", pin: Optional[str] = None):
