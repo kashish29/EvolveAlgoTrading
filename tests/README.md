@@ -58,3 +58,12 @@ This command will find all files matching the pattern `test_*.py` within the `te
     *   **Scope**: Placeholder for tests of the `src/risk_management/` module components once they are developed (e.g., `RiskMonitor`, risk rule implementations). (Currently contains `__init__.py`).
 
 This README serves as a guide to understanding the testing landscape of the project. Developers should add new tests here as new functionalities are introduced.
+
+## Analytics Module Tests (`tests/analytics`)
+
+Unit tests for the `PerformanceReporter` and other components of the Analytics module are located in the `tests/analytics/` directory. These tests ensure the correctness of performance metric calculations, report generation logic, and plotting functionalities.
+
+*   **`tests/analytics/test_performance_reporter.py`**: Contains detailed unit tests for the `PerformanceReporter` class.
+    *   See `tests/analytics/README.md` for more details on the testing strategy for this component.
+
+Integration tests that verify the interaction between `BacktesterEngine` and `PerformanceReporter` can be found in `tests/backtester/test_engine_analytics_integration.py`.
