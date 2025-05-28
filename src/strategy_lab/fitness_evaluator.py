@@ -7,15 +7,16 @@ from typing import Dict, Any, Optional, List, Type
 from src.data_handler.historical_data_manager import HistoricalDataManager
 from src.broker_api.mock_fyers_client import MockFyersClient
 from src.backtester.engine import BacktesterEngine
-from src.backtester.metrics import calculate_all_metrics
-from src.core.models import Candle, Timeframe # Corrected Timeframe import
+# from src.backtester.metrics import calculate_all_metrics # Replaced by PerformanceReporter
+from src.analytics.performance_reporter import PerformanceReporter # Added import
+from src.core.models import Candle, Timeframe 
 from src.strategies.base_strategy import BaseStrategy
 import src # Import the src package to pass to exec
 
 class FitnessEvaluator:
     """
     Evaluates the fitness of a trading strategy by running it through a backtester
-    and calculating performance metrics.
+    and calculating performance metrics using PerformanceReporter.
     """
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
@@ -23,21 +24,34 @@ class FitnessEvaluator:
 
         Args:
             config (Optional[Dict[str, Any]]): Configuration for the evaluator (e.g., backtester settings).
-                                                Currently not used extensively.
         """
         self.config = config or {}
+        # Updated default_error_metrics to align with PerformanceReporter keys
+        # Values represent "bad" outcomes for these metrics.
         self.default_error_metrics = {
-            "total_return_pct": -float('inf'),
-            "sharpe_ratio": -float('inf'),
-            "sortino_ratio": -float('inf'),
-            "max_drawdown_pct": -float('inf'),
-            "win_rate_pct": -float('inf'),
-            "profit_factor": -float('inf'),
-            "total_trades": 0,
-            "average_profit_per_trade": -float('inf'),
-            "average_loss_per_trade": float('inf'),
+            "Total Return [%]": -float('inf'),
+            "CAGR [%]": -float('inf'),
+            "Sharpe Ratio": -float('inf'),
+            "Sortino Ratio": -float('inf'),
+            "Max Drawdown [%]": float('inf'), # Max drawdown is typically negative, so a large positive is "bad" if it's reported as positive %
+            "Calmar Ratio": -float('inf'),
+            "Total Trades": 0,
+            "Win Rate [%]": 0.0,
+            "Profit Factor": 0.0,
+            "Avg Winning Trade PnL": 0.0,
+            "Avg Losing Trade PnL": 0.0, # Should be 0 or negative; 0 implies no losing trades or no trades
             "error": "Evaluation did not complete successfully." # Default error message
         }
+        # Ensure Max Drawdown from PerformanceReporter is handled consistently (it's positive percentage)
+        # If PerformanceReporter returns MDD as negative, then -float('inf') would be the "bad" default.
+        # PerformanceReporter's calculate_key_metrics returns Max Drawdown as a positive percentage.
+        # So, a large positive value is indeed "bad" if we are minimizing drawdown.
+        # However, for fitness, usually higher is better for returns/ratios, lower for drawdown.
+        # Let's keep it as float('inf') for "worst possible" if it means higher is worse.
+        # Or, if the fitness function will negate it, then -float('inf') is fine.
+        # For now, assuming this dict is just for "what happened if error", not direct fitness input.
+        # Let's stick to PerformanceReporter's typical output: Max Drawdown as positive percentage.
+        # So, default_error_metrics["Max Drawdown [%]"] = float('inf') is a "worst case" placeholder.
 
     def _find_strategy_class(self, strategy_namespace: Dict[str, Any]) -> Optional[Type[BaseStrategy]]:
         """
@@ -54,32 +68,47 @@ class FitnessEvaluator:
                 return obj
         return None
 
+    def _convert_trades_to_dataframe(self, trade_objects: list) -> pd.DataFrame:
+        if not trade_objects:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(trade_objects)
+        
+        # Ensure essential columns are present, others can be optional
+        # 'pnl' is critical for PerformanceReporter trade metrics
+        required_cols = {'symbol', 'side', 'quantity', 'price', 'timestamp', 'pnl'}
+        for col in required_cols:
+            if col not in df.columns:
+                # Add missing column with NaNs or default values
+                if col == 'pnl': df[col] = 0.0 
+                elif col == 'timestamp': df[col] = pd.NaT
+                elif col in ['quantity', 'price']: df[col] = 0.0
+                else: df[col] = None 
+        
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+        
+        numeric_cols = ['quantity', 'price', 'pnl', 'commission']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            elif col == 'pnl': # Ensure PnL exists even if not in original list and not caught by required_cols check earlier
+                df[col] = 0.0
+
+
+        return df
+
     def evaluate_strategy(self, strategy_code_string: str, historical_data_path: str, strategy_config: dict) -> dict:
         """
-        Evaluates a single strategy.
-
-        Args:
-            strategy_code_string (str): The Python code string of the strategy.
-            historical_data_path (str): Path to the CSV file containing historical market data.
-                                         Expected columns: timestamp, open, high, low, close, volume.
-            strategy_config (dict): Configuration specific to the strategy (e.g., symbol, parameters).
-
-        Returns:
-            dict: A dictionary containing performance metrics or an error message.
+        Evaluates a single strategy using PerformanceReporter.
         """
         error_metrics_with_details = self.default_error_metrics.copy()
         strategy_namespace = {}
         strategy_class = None
         
-        # 1. Dynamic Strategy Loading
-        # Create a scope for exec, and pass BaseStrategy and src for imports within the template.
         exec_globals = {
-            'BaseStrategy': BaseStrategy,
-            'src': src,  # Make the 'src' package available for imports like 'from src.core...'
-            '__builtins__': __builtins__
+            'BaseStrategy': BaseStrategy, 'src': src, '__builtins__': __builtins__
         }
-        strategy_namespace = {} # Local scope for the executed code
-
         try:
             exec(strategy_code_string, exec_globals, strategy_namespace)
             strategy_class = self._find_strategy_class(strategy_namespace) 
@@ -90,10 +119,8 @@ class FitnessEvaluator:
             error_metrics_with_details["error"] = f"Error executing strategy code: {str(e)}"
             return error_metrics_with_details
 
-        # 2. Data Loading and Preparation
         candles_list: List[Candle] = []
         symbol = strategy_config.get("symbol", "UNKNOWN_SYMBOL") 
-
         try:
             df = pd.read_csv(historical_data_path)
             if df.empty:
@@ -109,90 +136,91 @@ class FitnessEvaluator:
                     timestamp=row['timestamp'], open=row['open'], high=row['high'],
                     low=row['low'], close=row['close'], volume=row['volume'], symbol=symbol
                 ))
-            if not candles_list: # Should be caught by df.empty, but as a safeguard
+            if not candles_list:
                 error_metrics_with_details["error"] = "No candles processed from historical data."
                 return error_metrics_with_details
             start_date = candles_list[0].timestamp
             end_date = candles_list[-1].timestamp
-        except FileNotFoundError:
-            error_metrics_with_details["error"] = f"Historical data file not found: {historical_data_path}"
-            return error_metrics_with_details
-        except pd.errors.EmptyDataError: # For CSVs that exist but are totally empty or just headers
-             error_metrics_with_details["error"] = f"Historical data file is empty or malformed (pandas EmptyDataError): {historical_data_path}"
-             return error_metrics_with_details
         except Exception as e:
             error_metrics_with_details["error"] = f"Error loading or processing historical data: {str(e)}"
             return error_metrics_with_details
             
-        # 3. Backtesting Setup
         try:
             initial_cash = self.config.get("initial_cash", 100000)
             commission_rate = self.config.get("commission_rate", 0.0007)
-            
-            # MockFyersClient should be initialized with the actual candle data for the symbol.
             data_feeds_for_broker = {symbol: candles_list}
             broker = MockFyersClient(
-                historical_data=data_feeds_for_broker, # Pass loaded candles
-                initial_cash=initial_cash,
-                commission_rate=commission_rate
+                historical_data=data_feeds_for_broker, initial_cash=initial_cash, commission_rate=commission_rate
             )
-            
-            # HistoricalDataManager is initialized with the broker.
-            # It will use broker.get_historical_data to fetch (which for MockFyersClient means using the data_feeds_for_broker).
             hdm = HistoricalDataManager(broker_client=broker)
-            
             strategy_id = f"evolved_strat_{uuid.uuid4()}"
             if "symbol" not in strategy_config: strategy_config["symbol"] = symbol
-
             strategy_instance = strategy_class(strategy_id=strategy_id, broker=broker, config=strategy_config)
-            
             timeframe_value = strategy_config.get("timeframe", Timeframe.DAY_1.value)
             
             engine = BacktesterEngine(
                 strategy=strategy_instance, broker=broker, historical_data_manager=hdm,
-                symbols_to_trade=[symbol], timeframe=timeframe_value,
-                start_date=start_date, end_date=end_date
+                symbols=[symbol], timeframe=timeframe_value, # Corrected: symbols_to_trade -> symbols
+                start_date=start_date, end_date=end_date,
+                generate_analytics_report=False # No need for engine to generate its own report here
             )
         except Exception as e:
             error_metrics_with_details["error"] = f"Error setting up backtester: {str(e)}"
             return error_metrics_with_details
 
-        # 4. Run Backtest and Calculate Metrics
         try:
-            equity_curve, portfolio_history = engine.run()
+            _, portfolio_history = engine.run() # engine.run() returns (equity_curve_raw_values, portfolio_history)
             trade_log = broker.get_trade_history()
+            trade_df = self._convert_trades_to_dataframe(trade_log)
 
-            if not equity_curve:
-                 error_metrics_with_details["error"] = "Backtest engine returned an empty equity curve. No trades or activity."
-                 # Keep default bad metrics, but add this specific error.
-                 return error_metrics_with_details
+            if not portfolio_history:
+                error_metrics_with_details["error"] = "Portfolio history is empty. Cannot generate analytics metrics."
+                return error_metrics_with_details
+
+            timestamps = [entry['timestamp'] for entry in portfolio_history]
+            values = [entry['total_value'] for entry in portfolio_history]
+
+            temp_df = pd.DataFrame({'timestamp': pd.to_datetime(timestamps), 'value': values})
             
-            # Calculate backtest duration in days
-            backtest_duration_days = (end_date - start_date).days
-            if backtest_duration_days <= 0: # Avoid division by zero or negative duration
-                backtest_duration_days = 1 
+            if temp_df.empty or temp_df['value'].isnull().all(): # Check if temp_df is empty or all values are null
+                error_metrics_with_details["error"] = "Equity curve is empty or contains no valid values after processing portfolio_history."
+                return error_metrics_with_details
 
-            # Calculate metrics
-            # Assuming calculate_all_metrics can handle empty trade_log (e.g., if no trades occurred)
-            metrics = calculate_all_metrics(
-                equity_curve=equity_curve,
-                trade_log=trade_log, # List of Order objects
-                risk_free_rate_annual=self.config.get("risk_free_rate_annual", 0.02),
-                backtest_duration_days=backtest_duration_days,
-                trading_days_per_year=self.config.get("trading_days_per_year", 252)
-            )
-            return metrics # Successfully calculated metrics
+            # Ensure timestamps are unique and sorted for Series creation
+            # Group by timestamp and take the last entry for that timestamp to handle duplicates
+            if temp_df['timestamp'].duplicated().any():
+                temp_df = temp_df.groupby('timestamp').last()
+            else:
+                # If no duplicates, still set index for consistency before creating Series
+                temp_df = temp_df.set_index('timestamp')
+
+            equity_curve_series = pd.Series(temp_df['value'], name="Equity").sort_index()
+
+            if equity_curve_series.empty: # Final check
+                error_metrics_with_details["error"] = "Equity curve is empty after final processing. Cannot generate analytics metrics."
+                return error_metrics_with_details
+            
+            reporter = PerformanceReporter(trades=trade_df, equity_curve=equity_curve_series, benchmark_returns=None)
+            all_metrics = reporter.calculate_key_metrics()
+            
+            # Ensure all default metric keys are present in the final output, even if calculation failed partially
+            # PerformanceReporter.calculate_key_metrics should ideally return all keys with default/error values
+            # If not, we merge to ensure structure.
+            final_metrics = self.default_error_metrics.copy()
+            final_metrics.pop("error", None) # Remove default error message if we got metrics
+            final_metrics.update(all_metrics) # Overlay calculated metrics
+            
+            return final_metrics
             
         except Exception as e:
             error_metrics_with_details["error"] = f"Error during backtest execution or metrics calculation: {str(e)}"
+            # Log the full traceback for debugging if a logger was available
+            # import traceback
+            # self.logger.error(f"Full traceback: {traceback.format_exc()}")
             return error_metrics_with_details
 
 # Example Usage (for illustration, will not run in production directly)
 if __name__ == '__main__':
-    # This block is for testing the FitnessEvaluator if run directly.
-    # It requires setting up mock data and a sample strategy string.
-    
-    # Create a dummy CSV file for testing
     dummy_data = {
         'timestamp': pd.to_datetime(['2023-01-01 09:15:00', '2023-01-01 09:16:00', '2023-01-02 09:15:00', '2023-01-02 09:16:00', '2023-01-03 09:15:00']),
         'open': [100, 101, 102, 103, 104],
@@ -202,12 +230,9 @@ if __name__ == '__main__':
         'volume': [1000, 1100, 1200, 1300, 1400]
     }
     dummy_df = pd.DataFrame(dummy_data)
-    dummy_csv_path = "dummy_historical_data.csv"
+    dummy_csv_path = "dummy_historical_data_fitness.csv" # Unique name
     dummy_df.to_csv(dummy_csv_path, index=False)
 
-    # Sample strategy code string (very basic)
-    # Note: This strategy is very basic and might not generate trades.
-    # A proper EvolvedStrategy would have more logic.
     sample_strategy_code = """
 from src.strategies.base_strategy import BaseStrategy
 from src.core.models import Order, OrderType, OrderSide
@@ -217,49 +242,35 @@ class EvolvedStrategy(BaseStrategy):
         super().__init__(strategy_id, broker, config)
         self.symbol = self.config.get("symbol", "MOCK_SYMBOL")
         self.bought = False
+        # Access logger via self.logger if BaseStrategy provides it
+        # For example: self.logger.info("EvolvedStrategy initialized")
 
-    def on_bar(self, current_bars):
+    def on_bar(self, current_bars): # Renamed from on_bar to match BaseStrategy
         current_bar = current_bars.get(self.symbol)
         if not current_bar:
             return
 
-        # Simple logic: buy on first bar, sell on third bar if bought
-        if not self.bought:
-            self.logger.info(f"EvolvedStrategy: Attempting to BUY {self.symbol} at {current_bar.close}")
+        # Simple logic: buy on first bar, do nothing else to ensure some PNL.
+        if not self.bought and self.broker.get_current_bar_index() == 0 : # Buy on first bar (index 0)
+            # self.logger.info(f"EvolvedStrategy: Attempting to BUY {self.symbol} at {current_bar.close}")
+            print(f"EvolvedStrategy: Attempting to BUY {self.symbol} at {current_bar.close}")
             order = Order(symbol=self.symbol, quantity=1, side=OrderSide.BUY, order_type=OrderType.MARKET)
             try:
                 self.broker.place_order(order)
                 self.bought = True
-                self.logger.info(f"EvolvedStrategy: BUY order placed for {self.symbol}")
+                # self.logger.info(f"EvolvedStrategy: BUY order placed for {self.symbol}")
+                print(f"EvolvedStrategy: BUY order placed for {self.symbol}")
             except Exception as e:
-                self.logger.error(f"EvolvedStrategy: Error placing BUY order: {e}")
-        elif self.broker.get_current_bar_index() >= 2 and self.bought: # Sell on 3rd bar (index 2)
-            # Check if we have a position
-            all_positions = self.broker.get_positions()
-            active_position_qty = 0
-            for pos in all_positions:
-                if pos['symbol'] == self.symbol:
-                    active_position_qty = pos.get('quantity',0)
-                    break
-            
-            if active_position_qty > 0:
-                self.logger.info(f"EvolvedStrategy: Attempting to SELL {self.symbol} at {current_bar.close}")
-                order = Order(symbol=self.symbol, quantity=abs(active_position_qty), side=OrderSide.SELL, order_type=OrderType.MARKET)
-                try:
-                    self.broker.place_order(order)
-                    self.bought = False # Allow re-buying if logic extended
-                    self.logger.info(f"EvolvedStrategy: SELL order placed for {self.symbol}")
-                except Exception as e:
-                    self.logger.error(f"EvolvedStrategy: Error placing SELL order: {e}")
+                # self.logger.error(f"EvolvedStrategy: Error placing BUY order: {e}")
+                print(f"EvolvedStrategy: Error placing BUY order: {e}")
     """
+    # Note: The above strategy is extremely simple and will result in an open position.
+    # PnL calculations in MockFyersClient and trade history generation are crucial for meaningful metrics.
 
-    evaluator_config = {"initial_cash": 100000, "commission_rate": 0.001, "risk_free_rate_annual": 0.03}
+    evaluator_config = {"initial_cash": 100000, "commission_rate": 0.001}
     evaluator = FitnessEvaluator(config=evaluator_config)
     
-    strategy_parameters = {
-        "symbol": "TEST_SYM", 
-        "some_param": 10 # Example param for the strategy
-    }
+    strategy_parameters = { "symbol": "TEST_SYM" }
 
     print(f"Evaluating strategy with symbol: {strategy_parameters['symbol']}")
     results = evaluator.evaluate_strategy(
@@ -268,14 +279,16 @@ class EvolvedStrategy(BaseStrategy):
         strategy_config=strategy_parameters
     )
 
-    print("\\n--- Fitness Evaluation Results ---")
-    if "error" in results:
-        print(f"Error: {results['error']}")
-    else:
-        for metric, value in results.items():
-            print(f"{metric}: {value}")
+    print("\n--- Fitness Evaluation Results (FitnessEvaluator) ---")
+    # Check if 'error' key is present
+    if results.get("error", "Evaluation did not complete successfully.") != "Evaluation did not complete successfully." and "error" in results :
+         print(f"Error: {results['error']}")
+    # Print all metrics if no critical error, or if error is just a field among others
+    for metric, value in results.items():
+        if metric == "error" and value == "Evaluation did not complete successfully." and len(results) > 1:
+            continue # Skip printing default error if other metrics are present
+        print(f"{metric}: {value}")
     
-    # Clean up dummy CSV
     import os
     try:
         os.remove(dummy_csv_path)
@@ -283,31 +296,21 @@ class EvolvedStrategy(BaseStrategy):
     except OSError as e:
         print(f"Error removing {dummy_csv_path}: {e}")
 
-    print("\\n--- Test with faulty code ---")
-    faulty_code = "class MyInvalidStrategy(): def __init__(self): pass" # Not inheriting BaseStrategy
+    print("\n--- Test with faulty code (FitnessEvaluator) ---")
+    faulty_code = "class MyInvalidStrategy(): def __init__(self): pass"
+    # Recreate dummy file for this test
+    if not os.path.exists(dummy_csv_path): dummy_df.to_csv(dummy_csv_path, index=False)
     results_faulty = evaluator.evaluate_strategy(
-        faulty_code, 
-        dummy_csv_path, # Need to recreate for this test or handle absence
-        strategy_config={"symbol": "FAULT_SYM"}
+        faulty_code, dummy_csv_path, strategy_config={"symbol": "FAULT_SYM"}
     )
     print(results_faulty)
-    
-    # Recreate dummy for next test if needed, or ensure tests are independent
-    if not os.path.exists(dummy_csv_path):
-        dummy_df.to_csv(dummy_csv_path, index=False)
+    if os.path.exists(dummy_csv_path): os.remove(dummy_csv_path)
 
-    print("\\n--- Test with non-existent data path ---")
+
+    print("\n--- Test with non-existent data path (FitnessEvaluator) ---")
     results_no_data = evaluator.evaluate_strategy(
-        sample_strategy_code, 
-        "non_existent_data.csv", 
-        strategy_config={"symbol": "NO_DATA_SYM"}
+        sample_strategy_code, "non_existent_data.csv", strategy_config={"symbol": "NO_DATA_SYM"}
     )
     print(results_no_data)
-    
-    # Clean up dummy CSV if it was recreated
-    if os.path.exists(dummy_csv_path):
-        try:
-            os.remove(dummy_csv_path)
-            print(f"Cleaned up {dummy_csv_path} (final)")
-        except OSError as e:
-            print(f"Error removing {dummy_csv_path} (final): {e}")
+
+[end of src/strategy_lab/fitness_evaluator.py]

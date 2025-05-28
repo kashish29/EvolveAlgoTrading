@@ -66,7 +66,18 @@ The `EvolutionaryEngine` currently implements the following simplified operators
     -   It simulates interactions with a Large Language Model for tasks like refining strategy code based on feedback.
     -   Currently, its methods (`generate_strategy_code`, `refine_strategy_code`, `combine_strategy_codes`) return predefined or slightly modified versions of the input code/prompts, without actual LLM calls. This allows testing the integration points for future real LLM use.
 
-This module aims to provide a flexible and extensible framework for experimenting with AI techniques in algorithmic trading strategy development.Okay, `src/strategy_lab/README.md` has been updated.
+This module aims to provide a flexible and extensible framework for experimenting with AI techniques in algorithmic trading strategy development.
 
-Next, I will update `src/broker_api/README.md`.
-I'll first check if it exists and read its content.
+## Metrics Calculation via Analytics Module
+
+The `FitnessEvaluator` within the Strategy Lab now leverages the `PerformanceReporter` from the Analytics module (`src/analytics`) for more comprehensive and standardized calculation of performance metrics.
+
+### Enhanced Fitness Evaluation:
+
+*   After a strategy is backtested using `BacktesterEngine`, the `FitnessEvaluator`:
+    1.  Converts the trade history from the backtest into a structured Pandas DataFrame.
+    2.  Processes the portfolio's equity curve.
+    3.  Instantiates the `PerformanceReporter` with this data.
+    4.  Calls `PerformanceReporter.calculate_key_metrics()` to obtain a rich dictionary of performance indicators (e.g., Sharpe Ratio, Sortino Ratio, Max Drawdown, Total Return, Win Rate, Profit Factor, and many others).
+*   This dictionary of metrics becomes the primary source for determining the fitness score of the evaluated strategy.
+*   This integration ensures that strategy evaluation is based on a consistent and detailed set of industry-standard performance measures.

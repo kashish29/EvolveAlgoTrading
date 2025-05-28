@@ -46,3 +46,19 @@ This module is responsible for simulating the execution of trading strategies ag
 -   **`calculate_all_metrics()` / `get_performance_summary()`**: Typically, a primary function in this module aggregates all individual metric calculations and returns them as a dictionary, providing a comprehensive performance report for the strategy.
 
 This backtesting system allows for the iterative testing and refinement of trading strategies by providing quantitative feedback on their historical performance.
+
+## Analytics Integration
+
+The `BacktesterEngine` is integrated with the `PerformanceReporter` from the Analytics module (`src/analytics`) to provide detailed performance analysis after a backtest run.
+
+### Report Generation:
+
+*   If the `generate_analytics_report` flag is set to `True` (which is the default) when instantiating `BacktesterEngine`, the engine will automatically:
+    1.  Convert the recorded trade history into a structured Pandas DataFrame.
+    2.  Process the portfolio's equity curve over time.
+    3.  Instantiate the `PerformanceReporter`.
+    4.  Call `PerformanceReporter.generate_quantstats_report()` to create a comprehensive HTML performance report (e.g., `backtest_report_STRATEGYNAME_TIMESTAMP.html`).
+    5.  Optionally, call `PerformanceReporter.plot_equity_curve()` to save a visual plot of the equity curve (e.g., `equity_curve_STRATEGYNAME_TIMESTAMP.png`).
+*   The paths to the generated report and plot will be logged by the engine.
+
+This feature allows for immediate and detailed insights into a strategy's performance characteristics upon completion of a backtest.
