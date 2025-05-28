@@ -74,29 +74,24 @@ def run_strategy_lab_demo():
     # Configuration
     dummy_data_symbol = "DUMMY_SLAB_SYM"
     dummy_data_file = "dummy_slab_ohlcv.csv"
-    # Create data with enough history for typical MA calculations (e.g., 50-day MA needs more than 50 data points)
     create_dummy_ohlcv_data(dummy_data_file, dummy_data_symbol, days=70)
 
-    # Initialize StrategyLab components
     logger.info("Initializing StrategyLab components...")
     llm_interface = MockLLMInterface()
-    # EvolutionaryEngine uses DEFAULT_STRATEGY_TEMPLATE by default if not provided in constructor
     evolutionary_engine = EvolutionaryEngine(initial_strategy_template=DEFAULT_STRATEGY_TEMPLATE)
-    fitness_evaluator = FitnessEvaluator()  # Default config is usually fine
+    fitness_evaluator = FitnessEvaluator() 
 
-    # StrategyGenerator configuration
     generator_config = {
         "historical_data_path": dummy_data_file,
-        "strategy_config_template": {  # Passed to FitnessEvaluator for each strategy
+        "strategy_config_template": { 
             "symbol": dummy_data_symbol,
-            "timeframe": Timeframe.DAY_1.value,  # Ensure data matches this timeframe
-            # Base parameters for the EvolvedStrategy's config.get() if not set by evolution in code
-            "short_window": 7,  # This is a default, evolved code will have its own
-            "long_window": 15,  # This is a default, evolved code will have its own
+            "timeframe": Timeframe.DAY_1.value, 
+            "short_window": 7, 
+            "long_window": 15, 
             "quantity": 1
         },
-        "population_size": 10,  # Keep small for demo; e.g., 20-50 for more serious runs
-        "num_generations": 3  # Keep small for demo; e.g., 10-20 for more serious runs
+        "population_size": 10, 
+        "num_generations": 3 
     }
     logger.info(f"StrategyGenerator configured with: {generator_config['population_size']} population, {generator_config['num_generations']} generations.")
 
@@ -107,7 +102,6 @@ def run_strategy_lab_demo():
         config=generator_config
     )
 
-    # Run the evolution
     logger.info("Starting StrategyLab evolution process...")
     best_result = strategy_generator.run_evolution()
 
@@ -116,7 +110,6 @@ def run_strategy_lab_demo():
         print("\n" + "-" * 50)
         print("Strategy Lab Evolution Complete!")
         print("-" * 50)
-        # Use primary_fitness_metric from the engine instance for consistency
         primary_metric_name = evolutionary_engine.primary_fitness_metric
         primary_metric_value = best_fitness_metrics.get(primary_metric_name, 'N/A')
 
@@ -125,18 +118,38 @@ def run_strategy_lab_demo():
         else:
             print(f"Best strategy found with {primary_metric_name}: {primary_metric_value}")
 
-        print("Best Strategy Fitness Metrics:")
+        # Enhanced logging for key metrics
+        logger.info("Detailed performance metrics for the best strategy (from Analytics Module):")
+        key_metrics_to_log = {
+            "Sharpe Ratio": ".4f",
+            "Max Drawdown [%]": ".2f", # Assuming it's a percentage
+            "Total Return [%]": ".2f", # Assuming it's a percentage
+            "Win Rate [%]": ".2f", # Assuming it's a percentage
+            "Profit Factor": ".2f"
+        }
+        for metric_name, fmt_spec in key_metrics_to_log.items():
+            metric_val = best_fitness_metrics.get(metric_name)
+            if metric_val is not None:
+                try:
+                    # Attempt to format if it's a number, otherwise convert to string
+                    if isinstance(metric_val, (int, float)):
+                        logger.info(f"  {metric_name}: {metric_val:{fmt_spec}}")
+                    else:
+                         logger.info(f"  {metric_name}: {str(metric_val)}") # Handle non-numeric gracefully
+                except (ValueError, TypeError):
+                    logger.info(f"  {metric_name}: {metric_val} (Could not format)") # Log raw value if formatting fails
+            else:
+                logger.info(f"  {metric_name}: N/A")
+        
+        print("\nFull Fitness Metrics Set:") # Changed header for clarity
         for metric, value in best_fitness_metrics.items():
             if isinstance(value, float):
                 print(f"  {metric}: {value:.4f}")
             else:
                 print(f"  {metric}: {value}")
-        # print("\nBest Strategy Code Snippet (first 500 chars):")
-        # print(best_code[:500] + "...") # Optional: print part of the code
     else:
         print("\nStrategy Lab Evolution did not yield a best strategy or encountered an error.")
 
-    # Clean up dummy file - Enabled
     if os.path.exists(dummy_data_file):
         try:
             os.remove(dummy_data_file)
@@ -348,41 +361,35 @@ def run_live_simulation_demo():
 
 
 if __name__ == "__main__":
-    logger = logging.getLogger(__name__)  # Logger for main execution
+    logger = logging.getLogger(__name__) 
 
     # --- Backtester Demo Parameters ---
     symbol = "SBIN_NSE" # Symbol for backtester demo
     start_date = datetime(2023, 1, 1) # Corrected: datetime.datetime to datetime
     end_date = datetime(2023, 1, 31)  # Corrected: datetime.datetime to datetime
     # Timeframe for data generation and strategy (ensure consistency for backtester demo)
+
     data_timeframe = Timeframe.DAY_1
     initial_cash = 100000.0
-    commission_rate_broker = 0.0007  # Example commission
+    commission_rate_broker = 0.0007  
 
     logger.info(f"Setting up backtest for {symbol} from {start_date.date()} to {end_date.date()} with {data_timeframe.value} timeframe.")
 
-    # b. Prepare Historical Data (Sample Daily Data)
     sample_candles: list[Candle] = []
     current_date = start_date
     days_generated = 0
     base_open = 100.0
-    while current_date <= end_date and days_generated < 31:  # Generate up to 31 candles or until end_date
-        # Simple price movement for MA crossover
+    while current_date <= end_date and days_generated < 31: 
         open_price = base_open + days_generated * 0.5
-        close_price = base_open + days_generated * 0.5 - (days_generated % 5) + 2  # Creates some up/down for MA
-        if days_generated > 10 and days_generated < 20:  # dip
+        close_price = base_open + days_generated * 0.5 - (days_generated % 5) + 2  
+        if days_generated > 10 and days_generated < 20:  
             close_price = base_open + days_generated * 0.5 - (days_generated % 3) - 5
-        if days_generated > 20:  # recovery
+        if days_generated > 20:  
             close_price = base_open + days_generated * 0.5 + (days_generated % 2) + 3
 
         sample_candles.append(Candle(
-            timestamp=current_date,
-            symbol=symbol,
-            open=open_price,
-            high=open_price + 2.0,  # Simplified high
-            low=open_price - 2.0,  # Simplified low
-            close=close_price,
-            volume=10000 + days_generated * 100,
+            timestamp=current_date, symbol=symbol, open=open_price, high=open_price + 2.0, 
+            low=open_price - 2.0, close=close_price, volume=10000 + days_generated * 100,
             timeframe=data_timeframe
         ))
         current_date += datetime.timedelta(days=1)
@@ -395,62 +402,46 @@ if __name__ == "__main__":
     data_feeds = {symbol: sample_candles}
     logger.info(f"Generated {len(sample_candles)} sample candles for {symbol}.")
 
-    # c. Instantiate Components
     hdm = HistoricalDataManager()
-    hdm.load_data(data_feeds)  # Load data into HDM
+    hdm.load_data(data_feeds)  
 
-    # Pass HDM to broker if broker needs direct access to historical data (e.g. for fills)
-    # MockFyersClient current implementation of place_order for MARKET uses its own historical_data if symbol not in current_bars
-    # or get_current_bar.close(). It might be more robust to pass the HDM instance to the broker,
-    # but current MockFyersClient historical_data is a dict or an object with get_data.
-    # For simplicity, MockFyersClient was modified to accept historical_data, which can be an HDM.
     broker = MockFyersClient(
-        historical_data=hdm,  # Pass the HDM instance
-        initial_cash=initial_cash,
-        commission_rate=commission_rate_broker
+        historical_data=hdm, initial_cash=initial_cash, commission_rate=commission_rate_broker
     )
-    broker.connect()  # Connect the broker
+    broker.connect()  
 
     strategy_config = {
-        "symbol": symbol,
-        "short_window": 5,
-        "long_window": 10,
-        "quantity": 10,
-        "timeframe": data_timeframe  # Strategy might use this for context or internal logic
+        "symbol": symbol, "short_window": 5, "long_window": 10,
+        "quantity": 10, "timeframe": data_timeframe 
     }
     strategy = ExampleMovingAverageCrossStrategy(
-        strategy_id="MA_Cross_1",
-        broker=broker,
-        config=strategy_config
+        strategy_id="MA_Cross_1", broker=broker, config=strategy_config
     )
 
-    # Engine uses timeframe for its own context if needed, but primarily relies on HDM's sorted data
     engine = BacktesterEngine(
         strategy=strategy,
         broker=broker,
         historical_data_manager=hdm,
-        symbols_to_trade=[symbol],
-        timeframe=data_timeframe.value,  # Pass string value of timeframe
+        symbols=[symbol], # Corrected from symbols_to_trade to symbols
+        timeframe=data_timeframe.value, 
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        generate_analytics_report=True # Explicitly set for clarity
     )
 
-    # d. Run Backtest
     logger.info("Starting backtest engine...")
     equity_curve, portfolio_history = engine.run()
     logger.info("Backtest engine finished.")
 
-    # e. Print Results
     if equity_curve:
         logger.info(f"Final Portfolio Value: {equity_curve[-1]:.2f}")
     else:
         logger.info(f"Final Portfolio Value (no trades or activity): {initial_cash:.2f}")
 
     logger.info("Trade Log:")
-    trade_log = broker.get_trade_history()  # This returns a list of trade dicts
+    trade_log = broker.get_trade_history()  
     if trade_log:
         for trade in trade_log:
-            # Assuming trade is a dictionary as per MockFyersClient
             trade_info = (
                 f"TradeID: {trade.get('trade_id')}, OrderID: {trade.get('order_id')}, Symbol: {trade.get('symbol')}, "
                 f"Side: {trade.get('side')}, Qty: {trade.get('quantity')}, Price: {trade.get('price', 0.0):.2f}, "
@@ -462,7 +453,6 @@ if __name__ == "__main__":
 
     logger.info("Portfolio History Snapshots (last 5):")
     for snapshot in portfolio_history[-5:]:
-        # Snapshot is a dictionary from BacktesterEngine
         snap_info = (
             f"TS: {snapshot.get('timestamp')}, Cash: {snapshot.get('cash', 0.0):.2f}, "
             f"PositionsVal: {snapshot.get('positions_market_value', 0.0):.2f}, TotalVal: {snapshot.get('total_value', 0.0):.2f}"
@@ -527,3 +517,7 @@ if __name__ == "__main__":
     run_live_simulation_demo() # Newly added call
 
     logger.info("All Demos finished. Main execution completed.")
+
+
+    broker.disconnect() 
+    logger.info("Main execution finished.")

@@ -1,3 +1,6 @@
 pandas
 numpy
 PyYAML
+quantstats
+matplotlib
+plotly

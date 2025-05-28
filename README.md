@@ -23,6 +23,8 @@ The framework is composed of several key components:
     -   Manages order execution with a (currently mock) broker client.
     -   Allows for testing strategy logic in a simulated real-time event flow.
     -   **Note**: Currently uses `MockFyersClient` for simulated broker interactions. Real broker integration is a future step.
+
+*   **Analytics Module (`src/analytics`)**: Provides tools for in-depth performance analysis, report generation, and metrics calculation.
 *   **Interaction**: The `StrategyLab`'s `FitnessEvaluator` directly uses the `Backtester` to run each candidate strategy and obtain performance metrics, which are then used as fitness scores to guide the `EvolutionaryEngine`.
 
 ## Current Status
@@ -40,11 +42,16 @@ The framework has the following features implemented:
     *   `EvolutionaryEngine` implementing template-based strategy representation. It evolves parameters (e.g., `short_window`, `long_window`, `quantity`) within a predefined strategy code structure using string/dictionary modifications. Selection, crossover, and mutation operators are functional.
     *   `StrategyGenerator` that successfully runs the evolutionary loop, managing populations across multiple generations.
     *   `MockLLMInterface` integrated for simulated strategy refinement cycles.
+*   **Analytics Module**:
+    *   `PerformanceReporter` class capable of generating HTML reports via `quantstats`, calculating key metrics, and plotting equity curves.
+    *   Integration of `PerformanceReporter` into `BacktesterEngine` for automated report generation.
+    *   Integration of `PerformanceReporter` metrics into `FitnessEvaluator` for comprehensive fitness assessment.
 *   **Examples**:
     *   Example strategies demonstrating usage of the `BaseStrategy`.
 *   **Testing**:
     *   Comprehensive unit tests for `StrategyLab` components: `EvolutionaryEngine`, `StrategyGenerator`, and `FitnessEvaluator`.
     *   Unit tests for other core components like the `BacktestingEngine` and data models.
+    *   Unit tests for the `PerformanceReporter` in the Analytics module.
 
 ## Known Limitations
 
@@ -53,6 +60,19 @@ The framework has the following features implemented:
 *   **LLM Integration**: The LLM-based strategy refinement feature uses a `MockLLMInterface`. There is no integration with a real Large Language Model at this stage.
 *   **Data Handling**: Data handling capabilities are currently basic, primarily focused on loading historical data from CSV files. Real-time data feeds and broader data source integration are not yet implemented.
 *   **Risk Management**: A dedicated, comprehensive risk management module is not yet fully developed; current risk considerations are likely embedded within individual strategies or are basic.
+
+## Analytics Module
+
+The Analytics Module plays a crucial role in evaluating and understanding the performance of trading strategies. Its core component, `PerformanceReporter`, offers the following capabilities:
+
+*   **Comprehensive Reporting**: Generates detailed HTML reports using `quantstats`, summarizing strategy performance with numerous charts and metrics (e.g., CAGR, Sharpe Ratio, Sortino Ratio, Max Drawdown, Calmar Ratio, volatility, win/loss statistics, and more).
+*   **Key Metric Calculation**: Provides a standardized dictionary of key performance indicators (KPIs) crucial for assessing strategy viability.
+*   **Visualizations**: Generates plots such as the equity curve (with optional benchmark comparison) and drawdown underwater charts.
+
+**Integration:**
+
+*   **Backtester (`src/backtester`)**: The `BacktesterEngine` utilizes the Analytics Module to automatically generate performance reports and equity curve plots after each backtest run. This allows for immediate visual and statistical feedback on strategy performance.
+*   **Strategy Lab (`src/strategy_lab`)**: The `FitnessEvaluator` in the Strategy Lab uses the metrics calculated by the Analytics Module as the primary basis for determining the fitness of evolved or tested strategies. This ensures that strategy selection is driven by robust and comprehensive performance data.
 
 ## Roadmap/Next Steps
 
