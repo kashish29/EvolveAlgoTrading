@@ -17,6 +17,12 @@ The framework is composed of several key components:
     *   `EvolutionaryEngine`: Implements the genetic algorithm. This includes initializing a population of strategies (currently template-based), performing selection (e.g., tournament selection), crossover (e.g., parameter swapping within the strategy code), and mutation (e.g., random changes to parameters like `short_window`, `long_window`, `quantity` within the strategy code).
     *   `FitnessEvaluator`: Assesses the performance of candidate strategies. It utilizes the `Backtester` to run strategies against historical data and calculate fitness scores (e.g., Sharpe Ratio, Total Return).
     *   `LLMInterface`: An interface for incorporating Large Language Models into the strategy generation process. Currently, a `MockLLMInterface` is implemented, which simulates LLM responses for strategy refinement tasks without calling a real LLM.
+*   **`src/live_trader/`**: Implements the simulated live trading environment. 
+    -   Handles the event loop for market data and order updates.
+    -   Processes trading signals from strategies.
+    -   Manages order execution with a (currently mock) broker client.
+    -   Allows for testing strategy logic in a simulated real-time event flow.
+    -   **Note**: Currently uses `MockFyersClient` for simulated broker interactions. Real broker integration is a future step.
 *   **Interaction**: The `StrategyLab`'s `FitnessEvaluator` directly uses the `Backtester` to run each candidate strategy and obtain performance metrics, which are then used as fitness scores to guide the `EvolutionaryEngine`.
 
 ## Current Status

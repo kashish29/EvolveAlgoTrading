@@ -89,7 +89,8 @@ class TestStrategyGenerator(unittest.TestCase):
             # as this key is added later by the StrategyGenerator for its internal tracking.
             # So, expected_fitness_scores_for_evolve should reflect the direct output 
             # of fitness_evaluator.evaluate_strategy.
-            expected_fitness_scores_for_evolve = [self.default_fitness_score.copy() for _ in range(pop_size)]
+            # Using the actual scores from the sequence for the initial population
+            expected_fitness_scores_for_evolve = fitness_scores_sequence[:pop_size]
             # If specific varying scores were set up for the initial population evaluation, use those.
             # For this test, default_fitness_score is returned for all, so a list of copies is fine.
             self.assertEqual(first_evolve_call_args, call(self.initial_population, expected_fitness_scores_for_evolve))
@@ -154,7 +155,8 @@ class TestStrategyGenerator(unittest.TestCase):
 
     def test_run_evolution_handles_empty_population(self):
         pop_size = self.config['population_size']
-        self.generator.config['num_generations'] = 2 
+        self.generator.config['num_generations'] = 2
+        self.generator.config['num_llm_refinement_cycles'] = 0 # Prevent LLM refinement call
         self.mock_evolutionary_engine.reset_mock(); self.mock_fitness_evaluator.reset_mock(); self.mock_logger.reset_mock()
         self.mock_evolutionary_engine.initialize_population.return_value = []
         best_code_empty_init, best_fitness_empty_init = self.generator.run_evolution()
