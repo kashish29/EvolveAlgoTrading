@@ -314,5 +314,3 @@ class EvolvedStrategy(BaseStrategy):
         sample_strategy_code, "non_existent_data.csv", strategy_config={"symbol": "NO_DATA_SYM"}
     )
     print(results_no_data)
-
-[end of src/strategy_lab/fitness_evaluator.py]

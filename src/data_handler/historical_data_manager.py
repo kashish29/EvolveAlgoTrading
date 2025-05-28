@@ -7,10 +7,6 @@ from src.core.models import Candle, Timeframe  # Added import
 try:
     from src.broker_api.fyers_client import MockFyersClient
 except ImportError:
-    # This allows the file to be potentially run or imported in environments where the full structure isn't available,
-    # though for framework operation, the correct path should resolve.
-    # Fallback for direct testing or if paths are not yet perfectly set up.
-    # A more robust solution in a large project might involve better PYTHONPATH handling or stub files.
     print("Warning: MockFyersClient not found at its expected location. Ensure PYTHONPATH is set correctly or full framework is used.")
     MockFyersClient = None # Define it as None if import fails
 

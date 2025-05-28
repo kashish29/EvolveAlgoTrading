@@ -193,6 +193,3 @@ if __name__ == '__main__':
     print("Test complete for Scenario 5 (manual check of logs for error message recommended).")
 
     print("\nAll SignalProcessor example scenarios run.")
-
-# Ensure a trailing newline
-```

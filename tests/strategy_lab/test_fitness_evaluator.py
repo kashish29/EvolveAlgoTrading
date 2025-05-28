@@ -247,5 +247,3 @@ class TestFitnessEvaluator(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
-[end of tests/strategy_lab/test_fitness_evaluator.py]

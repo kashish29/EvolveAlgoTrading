@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from src.broker_api.mock_fyers_client import MockFyersClient
 
 class DataFeedSimulator:
-    def __init__(self, historical_data: pd.DataFrame, mock_broker: 'MockFyersClient', default_symbol: str = "DEFAULT_SYMBOL", default_timeframe: Timeframe = Timeframe.ONE_MINUTE):
+    def __init__(self, historical_data: pd.DataFrame, mock_broker: 'MockFyersClient', default_symbol: str = "DEFAULT_SYMBOL", default_timeframe: Timeframe = Timeframe.MINUTE_1):
         """
         Initializes the DataFeedSimulator.
 
@@ -260,4 +260,3 @@ if __name__ == '__main__':
         main_logger.info("Broker's simulated order update log is correctly empty.")
     else:
         main_logger.warning("Broker's simulated order update log is NOT empty. Some updates were not processed.")
-```

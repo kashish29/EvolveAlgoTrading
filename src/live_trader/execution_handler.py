@@ -215,6 +215,3 @@ if __name__ == '__main__':
 
     mock_broker.disconnect()
     print("\nExecutionHandler example scenarios completed.")
-
-# Ensure a trailing newline
-```
