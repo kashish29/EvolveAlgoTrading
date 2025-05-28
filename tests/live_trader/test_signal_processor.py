@@ -100,8 +100,8 @@ class TestSignalProcessor(unittest.TestCase):
         # This needs to match the actual log string format from SignalProcessor.
         # SignalProcessor log: `f"Signal for {signal.symbol}, action {signal.action}, quantity {signal.quantity} was REJECTED by RiskManager. Details: {getattr(signal, 'details', {})}"`
         # The test string should be:
-        expected_log_part = f"Signal for {self.sample_signal.symbol}, action {self.sample_signal.side.value}, quantity {self.sample_signal.quantity} was REJECTED by RiskManager."
-        self.assertIn(expected_log_part, args[0])
+        expected_log_part = f"Signal for {self.sample_signal.symbol}, action {self.sample_signal.side.value}, quantity {self.sample_signal.quantity} was REJECTED by RiskManager. Details: {{}}"
+        self.assertEqual(args[0], expected_log_part)
         current_mock_execution_handler.execute_signal.assert_not_called()
 
     @patch('logging.getLogger')
@@ -124,7 +124,7 @@ class TestSignalProcessor(unittest.TestCase):
         # SignalProcessor logs: `f"Signal for {signal.symbol}, action {signal.action}, quantity {signal.quantity} is now being forwarded to ExecutionHandler. Details: {getattr(signal, 'details', {})}"`
         # The provided test log was: f"Signal {self.sample_signal} approved" and "Forwarding to ExecutionHandler"
         # Let's match the actual log string:
-        expected_log_part = f"Signal for {self.sample_signal.symbol}, action {self.sample_signal.side.value}, quantity {self.sample_signal.quantity} is now being forwarded to ExecutionHandler."
+        expected_log_part = f"Signal for {self.sample_signal.symbol}, action {self.sample_signal.side.value}, quantity {self.sample_signal.quantity} is now being forwarded to ExecutionHandler. Details: {{}}"
 
         for call_args in mock_logger_instance.info.call_args_list:
             args_list, _ = call_args # call_args is a tuple (args, kwargs)

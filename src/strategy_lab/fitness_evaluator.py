@@ -76,14 +76,14 @@ class FitnessEvaluator:
         
         # Ensure essential columns are present, others can be optional
         # 'pnl' is critical for PerformanceReporter trade metrics
-        required_cols = {'symbol', 'side', 'quantity', 'price', 'timestamp', 'pnl'}
+        required_cols = {'symbol', 'side', 'quantity', 'price', 'timestamp', 'pnl', 'commission'}
         for col in required_cols:
             if col not in df.columns:
                 # Add missing column with NaNs or default values
-                if col == 'pnl': df[col] = 0.0 
+                if col == 'pnl': df[col] = 0.0
                 elif col == 'timestamp': df[col] = pd.NaT
-                elif col in ['quantity', 'price']: df[col] = 0.0
-                else: df[col] = None 
+                elif col in ['quantity', 'price', 'commission']: df[col] = 0.0
+                else: df[col] = None
         
         if 'timestamp' in df.columns:
             df['timestamp'] = pd.to_datetime(df['timestamp'])
@@ -141,6 +141,9 @@ class FitnessEvaluator:
                 return error_metrics_with_details
             start_date = candles_list[0].timestamp
             end_date = candles_list[-1].timestamp
+        except FileNotFoundError:
+            error_metrics_with_details["error"] = "Historical data file not found."
+            return error_metrics_with_details
         except Exception as e:
             error_metrics_with_details["error"] = f"Error loading or processing historical data: {str(e)}"
             return error_metrics_with_details
@@ -174,6 +177,10 @@ class FitnessEvaluator:
             _, portfolio_history = engine.run() # engine.run() returns (equity_curve_raw_values, portfolio_history)
             trade_log = broker.get_trade_history()
             trade_df = self._convert_trades_to_dataframe(trade_log)
+
+            if trade_df.empty:
+                error_metrics_with_details["error"] = "No trades recorded. Cannot generate analytics metrics."
+                return error_metrics_with_details
 
             if not portfolio_history:
                 error_metrics_with_details["error"] = "Portfolio history is empty. Cannot generate analytics metrics."

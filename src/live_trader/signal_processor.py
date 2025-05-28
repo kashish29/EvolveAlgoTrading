@@ -39,6 +39,7 @@ class SignalProcessor:
                                          intended for use by the RiskManager.
         """
         self.logger.debug(f"Received signal: {signal}. Portfolio state: {current_portfolio_state}")
+        self.logger.debug(f"Signal action: {signal.action}, Signal side value: {signal.side.value}")
 
         # --- Risk Management ---
         if self.risk_manager:
@@ -49,7 +50,7 @@ class SignalProcessor:
             if callable(validate_trade_method):
                 if not validate_trade_method(signal, current_portfolio_state):
                     self.logger.warning(
-                        f"Signal for {signal.symbol}, action {signal.action}, quantity {signal.quantity} "
+                        f"Signal for {signal.symbol}, action {signal.action.value}, quantity {signal.quantity} "
                         f"was REJECTED by RiskManager. Details: {getattr(signal, 'details', {})}"
                     )
                     return  # Stop processing if risk validation fails
@@ -64,7 +65,7 @@ class SignalProcessor:
         # --- Forward to Execution Handler ---
         # This block is reached if there's no risk_manager or if risk_manager.validate_trade returned True (or was skipped)
         self.logger.info(
-            f"Signal for {signal.symbol}, action {signal.action}, quantity {signal.quantity} "
+            f"Signal for {signal.symbol}, action {signal.action.value}, quantity {signal.quantity} "
             f"is now being forwarded to ExecutionHandler. Details: {getattr(signal, 'details', {})}"
         )
         
@@ -89,7 +90,7 @@ class SignalProcessor:
 
 if __name__ == '__main__':
     # Example Usage (for demonstration and basic testing)
-    logging.basicConfig(level=logging.DEBUG) # Set level to DEBUG for detailed example output
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s') # Set level to DEBUG for detailed example output
     
     # --- Mock Classes for Demonstration ---
     # Using the actual Signal class from src.core.models for type consistency

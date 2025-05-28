@@ -5,15 +5,21 @@ class OrderType(Enum):
     LIMIT = "LIMIT"
     STOP = "STOP"
     STOP_LIMIT = "STOP_LIMIT"
+    STOP_MARKET = "STOP_MARKET"
 
 class OrderStatus(Enum):
     PENDING = "PENDING"       # Order placed but not yet confirmed/rejected
+    PENDING_OPEN = "PENDING_OPEN" # Order is pending submission or opening
     OPEN = "OPEN"           # Order acknowledged by exchange, not yet filled
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
     FILLED = "FILLED"
+    COMPLETED = "COMPLETED" # Order is fully executed
     CANCELLED = "CANCELLED"
     REJECTED = "REJECTED"
     EXPIRED = "EXPIRED"
+    ACCEPTED = "ACCEPTED"   # Order is accepted by the broker, awaiting execution
+    MODIFIED = "MODIFIED"   # Order has been modified
+    TRIGGERED = "TRIGGERED" # Stop order has been triggered
 
 class TradeType(Enum): # This is often used for the 'side' of a trade or signal
     BUY = "BUY"

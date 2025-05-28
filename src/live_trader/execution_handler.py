@@ -2,7 +2,8 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from src.core.models import Signal, Order, OrderStatus, OrderSide, OrderType 
+from src.core.models import Signal, Order, OrderSide
+from src.core.enums import OrderType, OrderStatus
 
 if TYPE_CHECKING:
     from src.broker_api.base_broker_client import BaseBrokerClient
@@ -32,9 +33,10 @@ class ExecutionHandler:
 
         :param signal: The Signal object containing trade information.
         """
-        self.logger.info(f"Received signal to execute: {signal}")
-
+        logging.info(f"Executing signal: {signal}")
+        order_id = None # Initialize order_id
         try:
+            logging.info(f"Signal details: {signal.symbol}, {signal.side}, {signal.quantity}")
             # --- Convert Signal to Order ---
             # Map signal.side (which is already OrderSide type based on current Signal model) to order.side
             order_side = signal.side 
@@ -59,26 +61,29 @@ class ExecutionHandler:
                     return
 
             order_params = {
+                "id": None, # Explicitly set id to None, as it's assigned by broker
                 "symbol": signal.symbol,
                 "quantity": signal.quantity,
                 "side": order_side,
                 "order_type": order_type,
-                "timestamp": datetime.now(), 
-                "status": OrderStatus.PENDING_OPEN, # Initial status before broker confirmation
-                # id will be None; broker assigns it.
+                "timestamp": datetime.now(),
+                "status": OrderStatus.PENDING, # Initial status before broker confirmation
             }
+            self.logger.debug(f"Initial order_params before price/trigger_price assignment: {order_params}")
 
             if order_type == OrderType.LIMIT or order_type == OrderType.STOP_LIMIT:
                 if signal.price is None:
                     self.logger.error(f"{order_type.value} order signal ID {getattr(signal, 'id', 'N/A')} for {signal.symbol} is missing 'price'.")
                     return
                 order_params["price"] = signal.price
+                self.logger.debug(f"Assigned price {signal.price} for {order_type.value} order.")
             
-            if order_type == OrderType.STOP_MARKET or order_type == OrderType.STOP_LIMIT:
+            if order_type in [OrderType.STOP_MARKET, OrderType.STOP_LIMIT, OrderType.STOP]:
                 if signal.stop_price is None: # stop_price from Signal maps to trigger_price in Order
                     self.logger.error(f"{order_type.value} order signal ID {getattr(signal, 'id', 'N/A')} for {signal.symbol} is missing 'stop_price' (for trigger_price).")
                     return
                 order_params["trigger_price"] = signal.stop_price
+                self.logger.debug(f"Assigned trigger_price {signal.stop_price} for {order_type.value} order.")
 
             # Include other details from signal if they are relevant for Order
             # Example: signal.timeframe could be order.timeframe if Order model has it
@@ -92,29 +97,34 @@ class ExecutionHandler:
 
             order_to_place = Order(**order_params)
             self.logger.info(f"Constructed Order: {order_to_place} from Signal ID {getattr(signal, 'id', 'N/A')}")
-
-            # --- Place the Order ---
+            self.logger.debug(f"Order status before placing with broker: {order_to_place.status}")
+ 
+             # --- Place the Order ---
             self.logger.info(f"Placing order for {order_to_place.symbol} with broker...")
             
             order_id, broker_status_str = self.broker_client.place_order(order_to_place)
             
             self.logger.info(
-                f"Order placement attempt for {order_to_place.symbol} (Signal ID {getattr(signal, 'id', 'N/A')}) "
-                f"resulted in: Broker Order ID: {order_id}, Status from broker: {broker_status_str}."
+                 f"Order placement attempt for {order_to_place.symbol} (Signal ID {getattr(signal, 'id', 'N/A')}) "
+                 f"resulted in: Broker Order ID: {order_id}, Status from broker: {broker_status_str}."
             )
             
-            # Update the order object with the broker-assigned ID and status
-            # This is useful if the order object is used further (e.g., stored, passed to strategy)
+             # Update the order object with the broker-assigned ID and status
+             # This is useful if the order object is used further (e.g., stored, passed to strategy)
             if order_id: # If an ID was returned
-                setattr(order_to_place, 'id', order_id)
+                 self.logger.info(f"Order ID received from broker: {order_id}")
+                 setattr(order_to_place, 'id', order_id)
+            else:
+                 self.logger.warning("No Order ID received from broker.")
             try:
-                # Attempt to map broker status string to OrderStatus enum
-                setattr(order_to_place, 'status', OrderStatus(broker_status_str.upper()))
+                 # Attempt to map broker status string to OrderStatus enum
+                 new_status = OrderStatus(broker_status_str.upper())
+                 setattr(order_to_place, 'status', new_status)
+                 self.logger.debug(f"Order status updated to: {order_to_place.status} after broker response.")
             except ValueError:
-                self.logger.warning(f"Broker status '{broker_status_str}' for order {order_id} is not a recognized OrderStatus enum member. Storing raw status.")
-                # Optionally store the raw string if OrderStatus enum doesn't cover it
-                # setattr(order_to_place, 'raw_broker_status', broker_status_str)
-
+                 self.logger.warning(f"Broker status '{broker_status_str}' for order {order_id} is not a recognized OrderStatus enum member. Storing raw status.")
+                 # Optionally store the raw string if OrderStatus enum doesn't cover it
+                 # setattr(order_to_place, 'raw_broker_status', broker_status_str)
 
         except Exception as e:
             self.logger.error(
@@ -123,9 +133,9 @@ class ExecutionHandler:
             )
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
-    from src.broker_api.mock_fyers_client import MockFyersClient 
+    from src.broker_api.mock_fyers_client import MockFyersClient
     from src.core.models import Candle, Timeframe # For setting up mock broker
     
     mock_broker = MockFyersClient(initial_cash=100000)

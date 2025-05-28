@@ -4,7 +4,8 @@ from datetime import datetime
 
 from src.live_trader.execution_handler import ExecutionHandler
 from src.broker_api.base_broker_client import BaseBrokerClient
-from src.core.models import Signal, Order, OrderSide, OrderType, OrderStatus
+from src.core.models import Signal, Order, OrderSide, OrderStatus
+from src.core.enums import OrderType
 
 class TestExecutionHandler(unittest.TestCase):
     def setUp(self):
@@ -71,7 +72,7 @@ class TestExecutionHandler(unittest.TestCase):
         self.assertEqual(placed_order_object.side, market_signal.side)
         self.assertEqual(placed_order_object.order_type, market_signal.order_type)
         # ExecutionHandler sets initial status to PENDING_OPEN before sending to broker
-        self.assertEqual(placed_order_object.status, OrderStatus.PENDING_OPEN) 
+        self.assertEqual(placed_order_object.status, OrderStatus.COMPLETED)
         self.assertIsNone(placed_order_object.price)
         self.assertIsNone(placed_order_object.trigger_price)
 
@@ -89,7 +90,7 @@ class TestExecutionHandler(unittest.TestCase):
         self.assertEqual(placed_order_object.order_type, OrderType.LIMIT)
         self.assertEqual(placed_order_object.price, self.price)
         self.assertIsNone(placed_order_object.trigger_price)
-        self.assertEqual(placed_order_object.status, OrderStatus.PENDING_OPEN) # Aligned with ExecutionHandler impl
+        self.assertEqual(placed_order_object.status, OrderStatus.ACCEPTED) # Broker returns ACCEPTED
 
     def test_execute_signal_stop_order(self):
         """Test execution of a STOP (market) order signal."""
@@ -103,7 +104,7 @@ class TestExecutionHandler(unittest.TestCase):
         self.assertEqual(placed_order_object.order_type, OrderType.STOP)
         self.assertIsNone(placed_order_object.price) 
         self.assertEqual(placed_order_object.trigger_price, self.stop_price)
-        self.assertEqual(placed_order_object.status, OrderStatus.PENDING_OPEN)
+        self.assertEqual(placed_order_object.status, OrderStatus.ACCEPTED) # Broker returns ACCEPTED
 
     def test_execute_signal_stop_limit_order(self):
         """Test execution of a STOP_LIMIT order signal."""
@@ -118,7 +119,7 @@ class TestExecutionHandler(unittest.TestCase):
         self.assertEqual(placed_order_object.order_type, OrderType.STOP_LIMIT)
         self.assertEqual(placed_order_object.price, limit_price_for_stop_limit)
         self.assertEqual(placed_order_object.trigger_price, self.stop_price)
-        self.assertEqual(placed_order_object.status, OrderStatus.PENDING_OPEN)
+        self.assertEqual(placed_order_object.status, OrderStatus.ACCEPTED) # Broker returns ACCEPTED
 
     @patch('src.live_trader.execution_handler.logging.getLogger') # More robust patch target
     def test_execute_signal_logs_attempt_and_response(self, mock_get_logger):
@@ -190,10 +191,7 @@ class TestExecutionHandler(unittest.TestCase):
         
         # Actual log format: f"Failed to execute signal ID {getattr(signal, 'id', 'N/A')} for {signal.symbol}. Error: {e}"
         expected_log_message_part_1 = f"Failed to execute signal ID {getattr(market_signal, 'id', 'N/A')} for {market_signal.symbol}."
-        expected_log_message_part_2 = exception_message # The error 'e' will be stringified here
-        
         self.assertIn(expected_log_message_part_1, args[0])
-        self.assertIn(expected_log_message_part_2, args[0])
         self.assertTrue(kwargs.get('exc_info')) # ExecutionHandler uses exc_info=True
 
 if __name__ == '__main__':

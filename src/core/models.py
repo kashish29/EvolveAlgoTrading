@@ -1,55 +1,10 @@
 from dataclasses import dataclass, field
-from enum import Enum
 from datetime import datetime
 from typing import Optional # Keep List if Signal or other parts need it.
 
-# --- Enums (merged from src copy and existing enums.py) ---
-class Timeframe(Enum):
-    MINUTE_1 = "1minute"
-    MINUTE_3 = "3minute"
-    MINUTE_5 = "5minute"
-    MINUTE_10 = "10minute"
-    MINUTE_15 = "15minute"
-    MINUTE_30 = "30minute"
-    HOUR_1 = "1hour"
-    DAY_1 = "1day"
-    WEEK_1 = "1week"
-    MONTH_1 = "1month"
-    # Adding TICK from original enums.py, ensuring consistency if used elsewhere
-    TICK = "TICK" 
+from src.core.enums import Timeframe, OrderType, OrderStatus, OrderSide, InstrumentType
 
-class OrderType(Enum):
-    MARKET = "MARKET"
-    LIMIT = "LIMIT"
-    STOP = "STOP"
-    STOP_LIMIT = "STOP_LIMIT"
-
-class OrderStatus(Enum):
-    PENDING = "PENDING"       # Order is pending submission or acknowledgement
-    ACCEPTED = "ACCEPTED"     # Order is accepted by the broker, awaiting execution
-    REJECTED = "REJECTED"     # Order is rejected by the broker
-    COMPLETED = "COMPLETED"   # Order is fully executed
-    CANCELLED = "CANCELLED"   # Order is cancelled
-    MODIFIED = "MODIFIED"     # Order has been modified
-    TRIGGERED = "TRIGGERED"   # Stop order has been triggered
-    # Adding from original enums.py for completeness, may need reconciliation if behavior differs
-    OPEN = "OPEN" # From original, might overlap with ACCEPTED
-    PARTIALLY_FILLED = "PARTIALLY_FILLED" # From original
-    FILLED = "FILLED" # From original, might overlap with COMPLETED
-    EXPIRED = "EXPIRED" # From original
-
-class OrderSide(Enum): # Replaces TradeType
-    BUY = "BUY"
-    SELL = "SELL"
-
-class InstrumentType(Enum): # From original enums.py
-    EQUITY = "EQUITY"
-    FUTURE = "FUTURE"
-    OPTION = "OPTION"
-    FOREX = "FOREX"
-    CRYPTO = "CRYPTO"
-
-# --- Data Classes (merged) ---
+# --- Data Classes ---
 
 @dataclass
 class Candle: # Merged, using src copy structure primarily
@@ -72,6 +27,7 @@ class Signal: # Retained from src, adapted enums
     stop_price: Optional[float] = None
     quantity: Optional[float] = 1.0
     comment: Optional[str] = None
+    action: OrderSide = OrderSide.BUY
 
 @dataclass
 class Order: # From src copy, with minor adaptations

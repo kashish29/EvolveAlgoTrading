@@ -1,6 +1,9 @@
 import pandas as pd
 import quantstats
 import matplotlib.pyplot as plt
+import logging
+
+logger = logging.getLogger(__name__)
 import numpy as np # Import numpy for np.random used in example
 
 class PerformanceReporter:
@@ -13,26 +16,26 @@ class PerformanceReporter:
         if not isinstance(self.equity_curve.index, pd.DatetimeIndex):
             try:
                 self.equity_curve.index = pd.to_datetime(self.equity_curve.index)
-                # print("PerformanceReporter: Equity curve index converted to DatetimeIndex.")
+                logger.debug("PerformanceReporter: Equity curve index converted to DatetimeIndex.")
             except Exception as e:
-                print(f"PerformanceReporter: Warning - Failed to convert equity_curve index to DatetimeIndex: {e}. Calculations may fail.")
+                logger.warning(f"PerformanceReporter: Warning - Failed to convert equity_curve index to DatetimeIndex: {e}. Calculations may fail.")
 
         if self.benchmark_returns is not None and not isinstance(self.benchmark_returns.index, pd.DatetimeIndex):
             try:
                 self.benchmark_returns.index = pd.to_datetime(self.benchmark_returns.index)
-                # print("PerformanceReporter: Benchmark returns index converted to DatetimeIndex.")
+                logger.debug("PerformanceReporter: Benchmark returns index converted to DatetimeIndex.")
             except Exception as e:
-                print(f"PerformanceReporter: Warning - Failed to convert benchmark_returns index to DatetimeIndex: {e}. Calculations may fail.")
+                logger.warning(f"PerformanceReporter: Warning - Failed to convert benchmark_returns index to DatetimeIndex: {e}. Calculations may fail.")
         
         self.daily_returns = self._calculate_daily_returns()
 
     def _calculate_daily_returns(self) -> pd.Series:
         if self.equity_curve is None or self.equity_curve.empty:
-            # print("PerformanceReporter: Warning - Equity curve is empty or None. Cannot calculate daily returns.")
+            logger.warning("PerformanceReporter: Warning - Equity curve is empty or None. Cannot calculate daily returns.")
             return pd.Series(dtype=float)
 
         if not isinstance(self.equity_curve.index, pd.DatetimeIndex):
-            # print("PerformanceReporter: Error - Equity curve index is not DatetimeIndex. Cannot resample for daily returns.")
+            logger.error("PerformanceReporter: Error - Equity curve index is not DatetimeIndex. Cannot resample for daily returns.")
             return pd.Series(dtype=float)
 
         # Resample to daily frequency, taking the last value of each day
@@ -48,7 +51,7 @@ class PerformanceReporter:
 
     def generate_quantstats_report(self, output_path: str = "report.html", title: str = "Strategy Performance"):
         if self.daily_returns.empty:
-            print("PerformanceReporter: Daily returns are empty. Cannot generate QuantStats report.")
+            logger.warning("PerformanceReporter: Daily returns are empty. Cannot generate QuantStats report.")
             return
 
         qs_returns = self.daily_returns.copy()
@@ -82,14 +85,14 @@ class PerformanceReporter:
                 elif isinstance(aligned_data, pd.Series): # Only returns were processed
                     qs_returns = aligned_data
                     qs_benchmark = None # Reset benchmark if make_portfolio didn't include it
-                # print("PerformanceReporter: Aligned returns and benchmark for QuantStats report.")
+                logger.debug("PerformanceReporter: Aligned returns and benchmark for QuantStats report.")
             except Exception as e:
-                print(f"PerformanceReporter: Warning - Could not align returns and benchmark via quantstats.utils.make_portfolio: {e}. Proceeding with original series.")
+                logger.warning(f"PerformanceReporter: Warning - Could not align returns and benchmark via quantstats.utils.make_portfolio: {e}. Proceeding with original series.")
         try:
             quantstats.reports.html(qs_returns, benchmark=qs_benchmark, output=output_path, title=title, compounded=True)
-            # print(f"PerformanceReporter: QuantStats report generated at {output_path}")
+            logger.info(f"PerformanceReporter: QuantStats report generated at {output_path}")
         except Exception as e:
-            print(f"PerformanceReporter: Error generating QuantStats report: {e}")
+            logger.error(f"PerformanceReporter: Error generating QuantStats report: {e}")
 
     def calculate_key_metrics(self) -> dict:
         metrics = {}
@@ -103,14 +106,14 @@ class PerformanceReporter:
             metrics["Total Return [%]"] = quantstats.stats.comp(qs_returns) * 100
             metrics["CAGR [%]"] = quantstats.stats.cagr(qs_returns) * 100
             metrics["Sharpe Ratio"] = quantstats.stats.sharpe(qs_returns)
-            metrics["Sortino Ratio"] = quantstats.stats.sortino(qs_returns, prepare_returns=False) # prepare_returns=False as we already have daily
+            metrics["Sortino Ratio"] = quantstats.stats.sortino(qs_returns) # prepare_returns=False as we already have daily
             metrics["Max Drawdown [%]"] = quantstats.stats.max_drawdown(qs_returns) * 100 
             metrics["Calmar Ratio"] = quantstats.stats.calmar(qs_returns)
             # metrics["Volatility (Ann.) [%]"] = quantstats.stats.volatility(qs_returns, annualize=True, prepare_returns=False) * 100
             # metrics["Skew"] = quantstats.stats.skew(qs_returns, prepare_returns=False)
             # metrics["Kurtosis"] = quantstats.stats.kurtosis(qs_returns, prepare_returns=False)
         else:
-            # print("PerformanceReporter: Daily returns are empty. Cannot calculate most performance metrics.")
+            logger.warning("PerformanceReporter: Daily returns are empty. Cannot calculate most performance metrics.")
             metrics["Total Return [%]"] = 0.0
             metrics["CAGR [%]"] = 0.0
             metrics["Sharpe Ratio"] = 0.0
@@ -137,7 +140,7 @@ class PerformanceReporter:
             metrics["Avg Winning Trade PnL"] = winning_trades_df['pnl'].mean() if num_winning_trades > 0 else 0
             metrics["Avg Losing Trade PnL"] = losing_trades_df['pnl'].mean() if num_losing_trades > 0 else 0
         else:
-            # print("PerformanceReporter: Trades data is missing or 'pnl' column not found. Cannot calculate trade-based metrics.")
+            logger.warning("PerformanceReporter: Trades data is missing or 'pnl' column not found. Cannot calculate trade-based metrics.")
             metrics["Total Trades"] = 0
             metrics["Win Rate [%]"] = 0
             metrics["Profit Factor"] = 0
@@ -147,8 +150,9 @@ class PerformanceReporter:
         return metrics
 
     def plot_equity_curve(self, output_path: str = None, show: bool = True):
+        logger.info(f"plot_equity_curve called with output_path='{output_path}', show={show}")
         if self.equity_curve is None or self.equity_curve.empty:
-            print("PerformanceReporter: Equity curve is empty. Cannot plot.")
+            logger.warning("PerformanceReporter: Equity curve is empty. Cannot plot.")
             return
 
         fig, ax = plt.subplots(figsize=self.config.get('plot_figsize', (12, 8)))
@@ -232,6 +236,7 @@ class PerformanceReporter:
 
 
                 ax.plot(benchmark_equity_display.index, benchmark_equity_display, label="Benchmark Equity", linestyle='--')
+                logger.info("PerformanceReporter: Plotted benchmark equity curve.")
 
         ax.set_title(self.config.get('plot_equity_title', "Equity Curve"))
         ax.set_xlabel("Date")
@@ -240,17 +245,21 @@ class PerformanceReporter:
         ax.grid(True)
 
         if output_path:
+            logger.info(f"PerformanceReporter: Attempting to save equity curve plot to {output_path}")
             plt.savefig(output_path)
-            # print(f"PerformanceReporter: Equity curve plot saved to {output_path}")
+            logger.info(f"PerformanceReporter: Equity curve plot saved to {output_path}")
         
         if show:
+            logger.info("PerformanceReporter: Attempting to show equity curve plot.")
             plt.show()
         
         plt.close(fig) # Close the plot to free memory
+        logger.info("PerformanceReporter: Equity curve plot figure closed.")
 
     def plot_drawdown_underwater(self, output_path: str = None, show: bool = True):
+        logger.info(f"plot_drawdown_underwater called with output_path='{output_path}', show={show}")
         if self.daily_returns.empty:
-            print("PerformanceReporter: Daily returns are empty. Cannot plot drawdown.")
+            logger.warning("PerformanceReporter: Daily returns are empty. Cannot plot drawdown.")
             return
 
         qs_returns = self.daily_returns.copy()
@@ -264,20 +273,25 @@ class PerformanceReporter:
             ax.set_title(self.config.get('plot_drawdown_title', "Drawdown Underwater Plot"))
 
             if output_path:
+                logger.info(f"PerformanceReporter: Attempting to save drawdown plot to {output_path}")
                 fig.savefig(output_path)
-                # print(f"PerformanceReporter: Drawdown plot saved to {output_path}")
+                logger.info(f"PerformanceReporter: Drawdown plot saved to {output_path}")
             
             if show:
+                logger.info("PerformanceReporter: Attempting to show drawdown plot.")
                 plt.show()
             
         except Exception as e:
-            print(f"PerformanceReporter: Error plotting drawdown: {e}")
+            logger.error(f"PerformanceReporter: Error plotting drawdown: {e}")
         finally:
             plt.close(fig) # Close the figure
+            logger.info("PerformanceReporter: Drawdown plot figure closed.")
 
 if __name__ == '__main__':
     # Example Usage
-    print("PerformanceReporter class defined. Example run starting...")
+    # Configure logging for the example usage
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger.info("PerformanceReporter class defined. Example run starting...")
     
     # Create dummy data for example
     np.random.seed(123) # For reproducibility of random numbers
@@ -321,47 +335,47 @@ if __name__ == '__main__':
         config=reporter_config
     )
     
-    print("\n--- Daily Returns (Head) ---")
-    print(reporter.daily_returns.head())
-
-    print("\n--- Key Metrics ---")
+    logger.info("\n--- Daily Returns (Head) ---")
+    logger.info(reporter.daily_returns.head())
+ 
+    logger.info("\n--- Key Metrics ---")
     metrics = reporter.calculate_key_metrics()
     for k, v in metrics.items():
-        print(f"{k}: {v:.2f}" if isinstance(v, float) else f"{k}: {v}")
-
-    print("\n--- Generating QuantStats Report ---")
+         logger.info(f"{k}: {v:.2f}" if isinstance(v, float) else f"{k}: {v}")
+ 
+    logger.info("\n--- Generating QuantStats Report ---")
     reporter.generate_quantstats_report(output_path="strategy_performance_report.html", title="My Custom Strategy Analysis")
-
-    print("\n--- Plotting Equity Curve ---")
-    reporter.plot_equity_curve(output_path="equity_curve.png", show=False) 
-
-    print("\n--- Plotting Drawdown Underwater ---")
+ 
+    logger.info("\n--- Plotting Equity Curve ---")
+    reporter.plot_equity_curve(output_path="equity_curve.png", show=False)
+ 
+    logger.info("\n--- Plotting Drawdown Underwater ---")
     reporter.plot_drawdown_underwater(output_path="drawdown_plot.png", show=False)
-
-    print("\nExample run finished. Check for 'strategy_performance_report.html', 'equity_curve.png', and 'drawdown_plot.png'.")
-
-    # Test with equity curve not having DatetimeIndex initially
-    print("\n--- Test with non-DatetimeIndex equity curve ---")
+ 
+    logger.info("\nExample run finished. Check for 'strategy_performance_report.html', 'equity_curve.png', and 'drawdown_plot.png'.")
+ 
+     # Test with equity curve not having DatetimeIndex initially
+    logger.info("\n--- Test with non-DatetimeIndex equity curve ---")
     equity_values_non_dt_idx = equity_curve_series.copy()
     equity_values_non_dt_idx.index = range(len(equity_values_non_dt_idx)) # Non-datetime index
-    
+     
     reporter_non_dt_idx = PerformanceReporter(trades=trades_df, equity_curve=equity_values_non_dt_idx, benchmark_returns=benchmark_daily_rets)
-    # print("Daily returns with auto-converted index:")
-    # print(reporter_non_dt_idx.daily_returns.head()) # Should be empty or log error if conversion failed and not handled
+    logger.info("Daily returns with auto-converted index:")
+    logger.info(reporter_non_dt_idx.daily_returns.head()) # Should be empty or log error if conversion failed and not handled
     metrics_non_dt = reporter_non_dt_idx.calculate_key_metrics()
-    print("Metrics for non-DatetimeIndex test:")
+    logger.info("Metrics for non-DatetimeIndex test:")
     for k,v in metrics_non_dt.items():
-        print(f"{k}: {v:.2f}" if isinstance(v, float) else f"{k}: {v}")
-    
-    # Test with empty equity curve
-    print("\n--- Test with empty equity curve ---")
+        logger.info(f"{k}: {v:.2f}" if isinstance(v, float) else f"{k}: {v}")
+     
+     # Test with empty equity curve
+    logger.info("\n--- Test with empty equity curve ---")
     reporter_empty_equity = PerformanceReporter(trades=trades_df, equity_curve=pd.Series(dtype=float, index=pd.to_datetime([])), benchmark_returns=benchmark_daily_rets)
     metrics_empty_equity = reporter_empty_equity.calculate_key_metrics()
-    print("Metrics for empty equity curve test:")
+    logger.info("Metrics for empty equity curve test:")
     for k,v in metrics_empty_equity.items():
-        print(f"{k}: {v:.2f}" if isinstance(v, float) else f"{k}: {v}")
+        logger.info(f"{k}: {v:.2f}" if isinstance(v, float) else f"{k}: {v}")
     reporter_empty_equity.generate_quantstats_report() # Should print message and not fail
     reporter_empty_equity.plot_equity_curve(show=False) # Should print message
     reporter_empty_equity.plot_drawdown_underwater(show=False) # Should print message
-
-    print("\nFinished all example runs.")
+ 
+    logger.info("\nFinished all example runs.")

@@ -62,14 +62,11 @@ class TestPerformanceReporter(unittest.TestCase):
             reporter_non_dt = PerformanceReporter(self.default_trades, equity_non_dt_index)
             # It should attempt conversion. If successful, daily_returns will be calculated.
             # The PerformanceReporter's __init__ tries to convert.
-            if not reporter_non_dt.daily_returns.empty: # Conversion was successful
-                 self.assertTrue(isinstance(reporter_non_dt.equity_curve.index, pd.DatetimeIndex))
-                 self.assertFalse(reporter_non_dt.daily_returns.empty)
-            else: # Conversion failed or was not attempted robustly enough for this specific non-datetime index
-                # This branch depends on how robust the conversion attempt is.
-                # For a simple range index, pd.to_datetime might fail without more info.
-                # The current implementation converts, so daily_returns should exist.
-                self.assertFalse(reporter_non_dt.daily_returns.empty, "Daily returns should be calculated after index conversion attempt.")
+            # The conversion to DatetimeIndex will happen, but for a range index,
+            # it will result in NaT values, leading to empty daily_returns after dropna().
+            # So, we expect daily_returns to be empty in this specific scenario.
+            self.assertTrue(isinstance(reporter_non_dt.equity_curve.index, pd.DatetimeIndex))
+            self.assertTrue(reporter_non_dt.daily_returns.empty, "Daily returns should be empty for non-meaningful datetime index.")
 
 
     def test_init_with_empty_equity_curve(self):
@@ -205,25 +202,29 @@ class TestPerformanceReporter(unittest.TestCase):
     # 4. plot_equity_curve
     @patch('src.analytics.performance_reporter.plt')
     def test_plot_equity_curve_show_only(self, mock_plt):
+        mock_fig = MagicMock()
+        mock_ax = MagicMock()
+        mock_plt.subplots.return_value = (mock_fig, mock_ax)
+
         self.reporter.plot_equity_curve(output_path=None, show=True)
         
         # Check plot calls for strategy equity
-        self.assertTrue(mock_plt.figure.called)
+        mock_plt.subplots.assert_called_once()
         # First call to plot is strategy
-        args_strategy, _ = mock_plt.plot.call_args_list[0]
+        args_strategy, _ = mock_ax.plot.call_args_list[0]
         pd.testing.assert_series_equal(pd.Series(args_strategy[1]), self.reporter.equity_curve, check_index=False, check_names=False)
         
         # Check plot calls for benchmark equity if benchmark exists
         if self.reporter.benchmark_returns is not None:
-            self.assertGreaterEqual(mock_plt.plot.call_count, 2) # strategy + benchmark
+            self.assertGreaterEqual(mock_ax.plot.call_count, 2) # strategy + benchmark
             # Check that benchmark plot was called (details of synthesized benchmark are complex to check here, focus on call)
             # args_benchmark, _ = mock_plt.plot.call_args_list[1]
             # self.assertTrue(len(args_benchmark[1]) > 0) # Some data was plotted for benchmark
 
-        self.assertTrue(mock_plt.title.called)
-        self.assertTrue(mock_plt.xlabel.called)
-        self.assertTrue(mock_plt.ylabel.called)
-        self.assertTrue(mock_plt.legend.called)
+        self.assertTrue(mock_ax.set_title.called)
+        self.assertTrue(mock_ax.set_xlabel.called)
+        self.assertTrue(mock_ax.set_ylabel.called)
+        self.assertTrue(mock_ax.legend.called)
         self.assertTrue(mock_plt.show.called)
         self.assertFalse(mock_plt.savefig.called)
         self.assertTrue(mock_plt.close.called)
@@ -231,20 +232,30 @@ class TestPerformanceReporter(unittest.TestCase):
 
     @patch('src.analytics.performance_reporter.plt')
     def test_plot_equity_curve_save_only(self, mock_plt):
+        mock_fig = MagicMock()
+        mock_ax = MagicMock()
+        mock_plt.subplots.return_value = (mock_fig, mock_ax)
+
         output_file = "equity.png"
         self.reporter.plot_equity_curve(output_path=output_file, show=False)
         
-        self.assertTrue(mock_plt.savefig.called_with(output_file))
+        mock_plt.subplots.assert_called_once()
+        mock_plt.savefig.assert_called_with(output_file)
         self.assertFalse(mock_plt.show.called)
         self.assertTrue(mock_plt.close.called)
 
     @patch('src.analytics.performance_reporter.plt')
     def test_plot_equity_curve_no_benchmark(self, mock_plt):
+        mock_fig = MagicMock()
+        mock_ax = MagicMock()
+        mock_plt.subplots.return_value = (mock_fig, mock_ax)
+
         reporter_no_bm = PerformanceReporter(self.default_trades, self.default_equity_curve, benchmark_returns=None)
         reporter_no_bm.plot_equity_curve(show=False)
         
-        mock_plt.plot.assert_called_once() # Only strategy equity should be plotted
-        args_strategy, _ = mock_plt.plot.call_args_list[0]
+        mock_plt.subplots.assert_called_once()
+        mock_ax.plot.assert_called_once() # Only strategy equity should be plotted
+        args_strategy, _ = mock_ax.plot.call_args_list[0]
         pd.testing.assert_series_equal(pd.Series(args_strategy[1]), reporter_no_bm.equity_curve, check_index=False, check_names=False)
         self.assertTrue(mock_plt.close.called)
 
@@ -265,8 +276,8 @@ class TestPerformanceReporter(unittest.TestCase):
         self.assertEqual(kwargs['ax'], mock_ax)
         
         self.assertTrue(mock_plt_general.show.called)
-        self.assertFalse(mock_fig.savefig.called) # savefig would be on the fig object
-        self.assertTrue(mock_plt_general.close.called_with(mock_fig))
+        self.assertFalse(mock_plt_general.savefig.called) # savefig would be on the fig object
+        mock_plt_general.close.assert_called_with(mock_fig)
 
 
     @patch('src.analytics.performance_reporter.quantstats.plots.drawdown')
@@ -279,27 +290,27 @@ class TestPerformanceReporter(unittest.TestCase):
 
         self.reporter.plot_drawdown_underwater(output_path=output_file, show=False)
         
-        self.assertTrue(mock_fig.savefig.called_with(output_file))
+        mock_fig.savefig.assert_called_with(output_file)
         self.assertFalse(mock_plt_general.show.called)
-        self.assertTrue(mock_plt_general.close.called_with(mock_fig))
+        mock_plt_general.close.assert_called_with(mock_fig)
 
     def test_empty_daily_returns_for_plots(self):
         empty_equity = pd.Series(dtype=float, index=pd.to_datetime([]))
         reporter_empty = PerformanceReporter(self.default_trades, empty_equity)
         self.assertTrue(reporter_empty.daily_returns.empty)
 
-        with patch('builtins.print') as mock_print:
+        with patch('src.analytics.performance_reporter.logger') as mock_logger:
             with patch('src.analytics.performance_reporter.plt') as mock_plt:
                  reporter_empty.plot_equity_curve(show=False)
                  # mock_plt.plot should not be called if equity_curve is empty
                  # The method has a check: if self.equity_curve is None or self.equity_curve.empty: print and return
                  self.assertFalse(mock_plt.plot.called)
-                 mock_print.assert_any_call("PerformanceReporter: Equity curve is empty. Cannot plot.")
+                 mock_logger.warning.assert_any_call("PerformanceReporter: Equity curve is empty. Cannot plot.")
 
             with patch('src.analytics.performance_reporter.quantstats.plots.drawdown') as mock_qs_drawdown:
                 reporter_empty.plot_drawdown_underwater(show=False)
                 self.assertFalse(mock_qs_drawdown.called) # Should not be called if daily_returns is empty
-                mock_print.assert_any_call("PerformanceReporter: Daily returns are empty. Cannot plot drawdown.")
+                mock_logger.warning.assert_any_call("PerformanceReporter: Daily returns are empty. Cannot plot drawdown.")
 
 
 if __name__ == '__main__':
