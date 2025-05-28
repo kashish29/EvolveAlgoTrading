@@ -1,9 +1,11 @@
 import pandas as pd
 from datetime import datetime
 from typing import Optional, Any
+from collections import defaultdict # Added import
+from src.core.models import Candle, Timeframe  # Added import
 # Attempt to import the mock client, handling potential import errors gracefully for standalone use/testing.
 try:
-    from algo_trading_framework.src.broker_api.fyers_client import MockFyersClient
+    from src.broker_api.fyers_client import MockFyersClient
 except ImportError:
     # This allows the file to be potentially run or imported in environments where the full structure isn't available,
     # though for framework operation, the correct path should resolve.
@@ -59,6 +61,16 @@ class HistoricalDataManager:
                 end_date=end_date
             )
 
+            if data_df is not None and isinstance(data_df, list):
+                if not data_df: # If the list is empty
+                    # Create an empty DataFrame with expected columns if possible, 
+                    # or handle as per existing logic for empty data.
+                    # For now, let's convert to an empty DataFrame.
+                    # Callers might expect certain columns even if empty.
+                    data_df = pd.DataFrame(data_df) # This will create an empty DF if list is empty
+                else:
+                    data_df = pd.DataFrame(data_df)
+
             if data_df is not None and not data_df.empty:
                 # Optional: Add further validation or processing here
                 # e.g., ensure required columns are present, sort by date, etc.
@@ -82,6 +94,86 @@ class HistoricalDataManager:
         except Exception as e:
             print(f"HistoricalDataManager: An error occurred while fetching data for {symbol}: {e}")
             return None
+
+    def get_all_data_sorted_by_timestamp(self, symbols: list[str], timeframe: str,
+                                         start_date: datetime, end_date: datetime) -> list[tuple[datetime, dict[str, Candle]]]:
+        """
+        Fetches historical data for multiple symbols, combines them, and sorts by timestamp.
+
+        Args:
+            symbols (list[str]): A list of trading symbols.
+            timeframe (str): The timeframe for the data (e.g., "1D", "5MIN").
+            start_date (datetime): The start date for the data.
+            end_date (datetime): The end date for the data.
+
+        Returns:
+            list[tuple[datetime, dict[str, Candle]]]: A list of tuples, where each tuple contains:
+                - A datetime object representing the timestamp.
+                - A dictionary where keys are symbol strings and values are Candle objects for that timestamp.
+              The list is sorted by timestamp in ascending order.
+        """
+        all_candles_by_timestamp = defaultdict(dict)
+        
+        # Convert timeframe string to Timeframe enum
+        try:
+            timeframe_enum = Timeframe(timeframe)
+        except ValueError:
+            # Attempt to map common timeframe strings to enum values if direct mapping fails
+            # This is a basic example; a more robust solution might involve a comprehensive mapping dictionary
+            if timeframe == "1D":
+                timeframe_enum = Timeframe.DAY_1
+            elif timeframe == "5MIN": # Example, adjust as per actual common inputs vs enum values
+                timeframe_enum = Timeframe.MINUTE_5
+            # Add more mappings as needed
+            else:
+                print(f"Warning: Timeframe string '{timeframe}' not directly mapped. Attempting fallback or default.")
+                # Fallback or raise error if no suitable mapping found
+                # For now, let's try to find a match by replacing "minute" with "MIN" etc. or use a default
+                # This part needs to be robust based on expected timeframe string formats
+                try:
+                    # Example: "5minute" -> "5MINUTE" -> Timeframe.MINUTE_5 (if enum names are like MINUTE_5)
+                    # This is highly dependent on enum naming and input string variations.
+                    processed_tf_str = timeframe.upper() # Basic processing
+                    if not processed_tf_str.startswith("MINUTE_") and "MINUTE" in processed_tf_str:
+                         processed_tf_str = processed_tf_str.replace("MINUTE","MINUTE_")
+
+                    timeframe_enum = Timeframe[processed_tf_str] # This requires exact match after processing
+                except KeyError:
+                    print(f"Error: Could not convert timeframe string '{timeframe}' to Timeframe enum. Please check mappings.")
+                    # Default to None or raise an error, depending on desired strictness
+                    # For this implementation, let's assume it might be set to None if conversion fails and Candle handles it
+                    timeframe_enum = None # Or raise ValueError("Invalid timeframe string")
+
+        for symbol in symbols:
+            print(f"Fetching data for symbol: {symbol}")
+            df = self.fetch_historical_data(symbol, timeframe, start_date, end_date)
+            if df is not None and not df.empty:
+                for _, row in df.iterrows():
+                    # Ensure timestamp is datetime object
+                    ts = pd.to_datetime(row['timestamp'])
+                    
+                    candle = Candle(
+                        timestamp=ts,
+                        symbol=symbol, # Use the current symbol in loop
+                        open=row['open'],
+                        high=row['high'],
+                        low=row['low'],
+                        close=row['close'],
+                        volume=int(row['volume']) if 'volume' in row and pd.notna(row['volume']) else 0,
+                        timeframe=timeframe_enum
+                    )
+                    all_candles_by_timestamp[ts][symbol] = candle
+            else:
+                print(f"No data fetched for symbol: {symbol}")
+
+        # Sort by timestamp
+        sorted_timestamps = sorted(all_candles_by_timestamp.keys())
+        
+        # Prepare the final list of tuples
+        result = [(ts, all_candles_by_timestamp[ts]) for ts in sorted_timestamps]
+        
+        print(f"Processed and sorted data for {len(symbols)} symbols. Returning {len(result)} timestamp entries.")
+        return result
 
 # Example Usage (can be removed or commented out for production)
 if __name__ == '__main__':

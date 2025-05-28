@@ -4,12 +4,11 @@ import datetime
 import inspect # For finding classes
 from typing import Dict, Any, Optional, List, Type
 
-from algo_trading_framework.src.data_handler.historical_data_manager import HistoricalDataManager
-from algo_trading_framework.src.broker_api.mock_fyers_client import MockFyersClient
-from algo_trading_framework.src.backtester.engine import BacktesterEngine
-from algo_trading_framework.src.backtester.metrics import calculate_all_metrics
-from algo_trading_framework.src.core.models import Candle
-from algo_trading_framework.src.core.enums import Timeframe
+from src.data_handler.historical_data_manager import HistoricalDataManager
+from src.broker_api.mock_fyers_client import MockFyersClient
+from src.backtester.engine import BacktesterEngine
+from src.backtester.metrics import calculate_all_metrics
+from src.core.models import Candle, Timeframe # Corrected Timeframe import
 from src.strategies.base_strategy import BaseStrategy
 import src # Import the src package to pass to exec
 
@@ -135,8 +134,7 @@ class FitnessEvaluator:
             broker = MockFyersClient(
                 historical_data=data_feeds_for_broker, # Pass loaded candles
                 initial_cash=initial_cash,
-                commission_rate=commission_rate,
-                symbols_allowed=[symbol]
+                commission_rate=commission_rate
             )
             
             # HistoricalDataManager is initialized with the broker.
@@ -164,7 +162,7 @@ class FitnessEvaluator:
             equity_curve, portfolio_history = engine.run()
             trade_log = broker.get_trade_history()
 
-            if equity_curve.empty:
+            if not equity_curve:
                  error_metrics_with_details["error"] = "Backtest engine returned an empty equity curve. No trades or activity."
                  # Keep default bad metrics, but add this specific error.
                  return error_metrics_with_details
@@ -211,8 +209,8 @@ if __name__ == '__main__':
     # Note: This strategy is very basic and might not generate trades.
     # A proper EvolvedStrategy would have more logic.
     sample_strategy_code = """
-from algo_trading_framework.src.strategies.base_strategy import BaseStrategy
-from algo_trading_framework.src.core.models import Order, OrderType, OrderSide
+from src.strategies.base_strategy import BaseStrategy
+from src.core.models import Order, OrderType, OrderSide
 
 class EvolvedStrategy(BaseStrategy):
     def __init__(self, strategy_id, broker, config):

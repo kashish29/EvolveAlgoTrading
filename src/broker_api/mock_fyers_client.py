@@ -2,11 +2,12 @@ import random
 import logging
 from datetime import datetime
 from src.broker_api.base_broker_client import BaseBrokerClient
-# Forward references for type hinting if needed, though Order and Timeframe are not used directly here yet
-# from typing import TYPE_CHECKING
-# if TYPE_CHECKING:
-#     from src.core.models import Order, Timeframe 
-from typing import Union, Dict, Any # For type hinting historical_data
+# Forward references for type hinting if needed
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from src.core.models import Order # Keep Order if used, or remove if not
+from src.core.models import Timeframe, Candle # Ensure Candle and Timeframe are imported
+from typing import Union, Dict, Any, Optional, List # Ensure List is here
 
 class MockFyersClient(BaseBrokerClient):
     def __init__(self, 
@@ -484,3 +485,44 @@ class MockFyersClient(BaseBrokerClient):
         self.logger.info("Subscribed to order updates.")
         # Mock implementation, always successful.
         return True
+
+    def get_historical_candles(self, symbol: str, timeframe: Timeframe, 
+                               from_date: datetime, to_date: datetime) -> List[Candle]:
+        self.logger.info(f"MockFyersClient: get_historical_candles called for {symbol} ({timeframe.value if isinstance(timeframe, Timeframe) else timeframe}) from {from_date} to {to_date}.")
+        
+        data_to_return: List[Candle] = []
+        
+        # Check if self.historical_data is a dict and contains the symbol's data
+        # This structure is used in test_engine.py where historical_data is {symbol: [Candle_objects]}
+        if isinstance(self.historical_data, dict) and symbol in self.historical_data:
+            all_symbol_candles = self.historical_data.get(symbol, [])
+            
+            for candle_obj in all_symbol_candles:
+                # Assuming candle_obj are actual Candle instances
+                if not isinstance(candle_obj, Candle):
+                    self.logger.warning(f"MockFyersClient: Item in historical_data for {symbol} is not a Candle object: {type(candle_obj)}. Skipping.")
+                    continue
+
+                candle_timestamp = getattr(candle_obj, 'timestamp', None)
+                
+                # Perform date filtering
+                if candle_timestamp and from_date <= candle_timestamp <= to_date:
+                    # Optional: Timeframe matching. The input `timeframe` is an enum.
+                    # Candle objects also have a `timeframe` attribute which should be a Timeframe enum.
+                    if hasattr(candle_obj, 'timeframe') and isinstance(getattr(candle_obj, 'timeframe'), Timeframe):
+                        if candle_obj.timeframe == timeframe:
+                            data_to_return.append(candle_obj)
+                        # else:
+                        #    self.logger.debug(f"Skipping candle due to timeframe mismatch: expected {timeframe}, got {candle_obj.timeframe}")
+                    else:
+                        # If candle_obj.timeframe is not set or not a Timeframe enum, include it based on date only
+                        # Or, be stricter: self.logger.warning(f"Candle for {symbol} at {candle_timestamp} missing valid timeframe attribute.")
+                        data_to_return.append(candle_obj) # Defaulting to less strict for now
+            
+            self.logger.info(f"MockFyersClient: Returning {len(data_to_return)} pre-loaded Candle objects for {symbol} matching criteria.")
+        else:
+            self.logger.warning(f"MockFyersClient: No pre-loaded data for {symbol} in self.historical_data dict for get_historical_candles.")
+            # Unlike get_historical_data, this method will not generate generic mock data.
+            # It expects data to be specifically pre-loaded if it's to be returned.
+
+        return data_to_return

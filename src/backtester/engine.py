@@ -1,25 +1,12 @@
 import datetime
 from src.core.models import Candle # Assuming Candle is directly in models
 # from ..core.models import Candle # Alternative if relative import is needed
+from src.data_handler.historical_data_manager import HistoricalDataManager # Added import
 
-# Placeholder for actual strategy and data manager
+# Placeholder for actual strategy
 class BaseStrategy: # pragma: no cover
     def on_bar(self, current_bar_data: dict, broker_interface):
         raise NotImplementedError
-
-class HistoricalDataManager: # pragma: no cover
-    def get_all_data_sorted_by_timestamp(self, symbols: list[str], timeframe: str, from_date: datetime.datetime, to_date: datetime.datetime) -> list[tuple[datetime.datetime, dict[str, Candle]]]:
-        # This method should fetch data for all symbols, merge them by timestamp,
-        # and return a list of tuples: (timestamp, {symbol: Candle_object_for_that_timestamp})
-        # Example: [(datetime(2023,1,1,9,15), {'SBIN': Candle(...), 'RELIANCE': Candle(...)}), ...]
-        # It needs to handle cases where some symbols might not have data for a particular timestamp.
-        raise NotImplementedError
-    
-    def get_bar_at(self, symbol: str, timestamp: datetime.datetime, timeframe: str) -> Candle | None:
-        # This is a conceptual method that might be used if data isn't pre-fetched and merged.
-        # For this implementation, we'll rely on pre-merged data from get_all_data_sorted_by_timestamp.
-        raise NotImplementedError
-
 
 class BacktesterEngine:
     def __init__(self, 
@@ -48,7 +35,12 @@ class BacktesterEngine:
         # It should be a list of (timestamp, {symbol: Candle}) sorted chronologically.
         # The HistoricalDataManager is expected to be pre-loaded with data for the relevant
         # symbols, timeframe, start_date, and end_date.
-        all_market_data = self.historical_data_manager.get_all_data_sorted_by_timestamp()
+        all_market_data = self.historical_data_manager.get_all_data_sorted_by_timestamp(
+            symbols=self.symbols_to_trade,
+            timeframe=self.timeframe,
+            start_date=self.start_date,
+            end_date=self.end_date
+        )
         
         if not all_market_data:
             self.broker.logger.warning("No market data fetched for the given symbols and date range.")

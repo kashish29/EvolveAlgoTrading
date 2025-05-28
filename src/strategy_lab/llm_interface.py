@@ -1,7 +1,7 @@
 from typing import Optional, Dict, List, TYPE_CHECKING, Any
 # The following imports are primarily for the template string, not directly used by MockLLMInterface methods.
-from algo_trading_framework.src.strategies.base_strategy import BaseStrategy
-from algo_trading_framework.src.core.models import Order, OrderType, OrderSide, Candle
+from src.strategies.base_strategy import BaseStrategy
+from src.core.models import Order, OrderType, OrderSide, Candle
 import logging # For the template
 import random # For the template
 

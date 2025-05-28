@@ -4,14 +4,14 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock # Added for broker mock
 
 from src.strategies.example_moving_average_cross_strategy import ExampleMovingAverageCrossStrategy
-from src.core.models import Candle, Signal, OrderSide # Correctly import OrderSide from models
-from src.core.enums import TradeType # TradeType is fine here
+from src.core.models import Candle, Signal, OrderSide, OrderType, Order # Correctly import OrderSide, OrderType, Order from models
 
 class TestExampleMovingAverageCrossStrategy(unittest.TestCase):
 
     def setUp(self):
         self.strategy_id = "TestMASymbol" 
         self.broker_mock = MagicMock() 
+        self.broker_mock.place_order.return_value = ("mock_order_id_123", "COMPLETED")
         self.config = {
             "short_window": 3, 
             "long_window": 5, 
@@ -46,45 +46,48 @@ class TestExampleMovingAverageCrossStrategy(unittest.TestCase):
         self.assertEqual(self.strategy.quantity, 10)
 
     def test_no_signal_on_insufficient_data(self):
-        signal = None
-        for i in range(self.config["long_window"]): 
+        self.broker_mock.reset_mock()
+        self.broker_mock.get_positions.return_value = []
+        for i in range(self.config["long_window"]):
             current_bars = {self.config["symbol"]: self.sample_history[i]}
-            signal = self.strategy.on_bar(current_bars)
-            if i < self.config["long_window"]: 
-                 self.assertIsNone(signal, f"Signal should be None at bar index {i} as prev MAs not yet stable.")
+            self.strategy.on_bar(current_bars)
+            self.broker_mock.place_order.assert_not_called()
 
     def test_sell_signal_generation(self):
+        self.broker_mock.reset_mock()
+        self.broker_mock.get_positions.return_value = [{'symbol': self.config['symbol'], 'quantity': self.config['quantity'], 'average_price': 100.0}]
         sell_signal_candle_idx = 7
-        signal = None
         for i in range(sell_signal_candle_idx + 1):
             current_bars = {self.config["symbol"]: self.sample_history[i]}
-            signal = self.strategy.on_bar(current_bars)
+            self.strategy.on_bar(current_bars)
             if i < sell_signal_candle_idx:
-                self.assertIsNone(signal, f"No signal expected at index {i}")
+                self.broker_mock.place_order.assert_not_called()
         
-        self.assertIsNotNone(signal, f"Signal should be generated for SELL at index {sell_signal_candle_idx}.")
-        if signal: 
-            self.assertEqual(signal.symbol, self.config["symbol"])
-            # The ExampleMovingAverageCrossStrategy creates an Order object with a 'side' attribute
-            # The Signal object itself might have 'trade_type' or 'side'.
-            # Let's assume the Signal object uses 'trade_type' which corresponds to TradeType.SELL
-            self.assertEqual(signal.trade_type, TradeType.SELL) 
-            self.assertEqual(signal.quantity, self.config["quantity"])
+        self.broker_mock.place_order.assert_called_once()
+        called_order = self.broker_mock.place_order.call_args[0][0]
+        self.assertIsInstance(called_order, Order)
+        self.assertEqual(called_order.symbol, self.config['symbol'])
+        self.assertEqual(called_order.quantity, self.config['quantity'])
+        self.assertEqual(called_order.side, OrderSide.SELL)
+        self.assertEqual(called_order.order_type, OrderType.MARKET)
 
     def test_buy_signal_generation(self):
+        self.broker_mock.reset_mock()
+        self.broker_mock.get_positions.return_value = []
         buy_signal_candle_idx = 12
-        signal = None
         for i in range(buy_signal_candle_idx + 1):
             current_bars = {self.config["symbol"]: self.sample_history[i]}
-            signal = self.strategy.on_bar(current_bars)
+            self.strategy.on_bar(current_bars)
             if i < buy_signal_candle_idx:
-                self.assertIsNone(signal, f"No signal expected at index {i} for BUY test.")
+                self.broker_mock.place_order.assert_not_called()
 
-        self.assertIsNotNone(signal, f"Signal should be generated for BUY at index {buy_signal_candle_idx}.")
-        if signal: 
-            self.assertEqual(signal.symbol, self.config["symbol"])
-            self.assertEqual(signal.trade_type, TradeType.BUY)
-            self.assertEqual(signal.quantity, self.config["quantity"])
+        self.broker_mock.place_order.assert_called_once()
+        called_order = self.broker_mock.place_order.call_args[0][0]
+        self.assertIsInstance(called_order, Order)
+        self.assertEqual(called_order.symbol, self.config['symbol'])
+        self.assertEqual(called_order.quantity, self.config['quantity'])
+        self.assertEqual(called_order.side, OrderSide.BUY)
+        self.assertEqual(called_order.order_type, OrderType.MARKET)
 
 if __name__ == '__main__':
     unittest.main()
