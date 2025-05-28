@@ -163,6 +163,7 @@ class FitnessEvaluator:
                 symbols=[symbol], timeframe=timeframe_value, # Corrected: symbols_to_trade -> symbols
                 start_date=start_date, end_date=end_date,
                 generate_analytics_report=False # No need for engine to generate its own report here
+
             )
         except Exception as e:
             error_metrics_with_details["error"] = f"Error setting up backtester: {str(e)}"
