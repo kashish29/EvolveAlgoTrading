@@ -15,9 +15,15 @@ class OrderStatus(Enum):
     REJECTED = "REJECTED"
     EXPIRED = "EXPIRED"
 
-class TradeType(Enum):
+class TradeType(Enum): # This is often used for the 'side' of a trade or signal
     BUY = "BUY"
     SELL = "SELL"
+
+class OrderSide(Enum): # Adding OrderSide as it's commonly used and was missing
+    BUY = "BUY"
+    SELL = "SELL"
+    # SHORT = "SHORT" # Depending on broker/requirements
+    # COVER = "COVER" # Depending on broker/requirements
 
 class InstrumentType(Enum):
     EQUITY = "EQUITY"

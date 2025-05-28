@@ -4,18 +4,19 @@ from algo_trading_framework.src.strategies.base_strategy import BaseStrategy
 from algo_trading_framework.src.core.models import Order, OrderType, OrderSide, Candle
 import logging # For the template
 import random # For the template
-# import re # Not directly used in template or mock methods, but often used with strategies.
 
+# NOTE: EVOLVED_STRATEGY_TEMPLATE is a direct copy of DEFAULT_STRATEGY_TEMPLATE
+# from evolutionary_engine.py. Consider refactoring to a shared constant to avoid duplication.
 # Copied from DEFAULT_STRATEGY_TEMPLATE in evolutionary_engine.py
 EVOLVED_STRATEGY_TEMPLATE = """
 import logging
-from algo_trading_framework.src.strategies.base_strategy import BaseStrategy
-from algo_trading_framework.src.core.models import Order, OrderType, OrderSide, Candle
+from src.strategies.base_strategy import BaseStrategy
+from src.core.models import Order, OrderType, OrderSide, Candle
 from typing import TYPE_CHECKING, Dict, List
 import random
 
 if TYPE_CHECKING:
-    from algo_trading_framework.src.broker_api.base_broker_client import BaseBrokerClient
+    from src.broker_api.base_broker_client import BaseBrokerClient
 
 class EvolvedStrategy(BaseStrategy):
     def __init__(self, strategy_id: str, broker: 'BaseBrokerClient', config: dict = None):

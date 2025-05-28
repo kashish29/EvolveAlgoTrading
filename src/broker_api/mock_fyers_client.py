@@ -29,7 +29,7 @@ class MockFyersClient(BaseBrokerClient):
         self.current_bars: dict = {} # Stores symbol: Candle for the current bar
         self.commission_rate: float = commission_rate
         # Simple slippage model: price +/- up to 0.05%
-        self.slippage_model = lambda price: price * (1 + random.uniform(-0.0005, 0.0005)) # Corrected slippage
+        self.slippage_model = lambda price: price * (1 + random.uniform(-0.0005, 0.0005))
         
         self.logger = logging.getLogger(self.__class__.__name__) # Use class name for logger
         # Basic config for logging, consider moving to a global config if app expands
@@ -394,43 +394,81 @@ class MockFyersClient(BaseBrokerClient):
 
     # --- Market Data Methods ---
     
-    def set_current_bar(self, symbol: str, bar: 'Candle'):
+    def set_current_bar(self, symbol: str, bar: Any): # bar is 'Candle'
         """
         Called by the backtesting engine to update the current bar for a symbol.
         """
         self.current_bars[symbol] = bar
-        # Optionally, also update historical_data's last_price if structure is known
-        # For example, if self.historical_data[symbol] = {'last_price': ...}
+        # Update last_price in positions if symbol exists
+        if symbol in self.positions and hasattr(bar, 'close'):
+            self.positions[symbol]['last_price'] = getattr(bar, 'close')
+        # Also update historical_data if it's a dict and being used to store last_price (less common for this mock)
         if isinstance(self.historical_data, dict) and symbol in self.historical_data:
-             if hasattr(bar, 'close'): # Check if bar has a close attribute
-                self.historical_data[symbol]['last_price'] = getattr(bar, 'close')
+             if hasattr(bar, 'close'):
+                if isinstance(self.historical_data[symbol], dict): # If historical_data stores dicts per symbol
+                    self.historical_data[symbol]['last_price'] = getattr(bar, 'close')
         elif isinstance(self.historical_data, dict) and symbol not in self.historical_data:
              if hasattr(bar, 'close'):
-                self.historical_data[symbol] = {'last_price': getattr(bar, 'close')}
+                 self.historical_data[symbol] = {'last_price': getattr(bar, 'close')}
 
 
-    def get_historical_candles(self, symbol: str, timeframe: 'Timeframe', from_date: 'datetime', to_date: 'datetime') -> list['Candle']:
-        if hasattr(self.historical_data, 'get_data') and callable(self.historical_data.get_data):
-            # Assumes self.historical_data is a HistoricalDataManager instance
-            return self.historical_data.get_data(symbol=symbol, timeframe=timeframe, from_date=from_date, to_date=to_date)
-        elif isinstance(self.historical_data, dict):
-            # Basic filtering if historical_data is a dict of lists of candles
-            # This is a simplified fallback and might not be fully robust for all timeframe/date filtering.
-            # For now, as per instruction, if it's a dict, delegation fails.
-            # The actual HistoricalDataManager should handle complex filtering.
-            self.logger.warning("get_historical_candles: historical_data is a dict, not a HistoricalDataManager. Returning empty list. Full filtering not implemented for dict.")
-            # Example basic filtering (if self.historical_data[symbol] was a list of candles):
-            # if symbol in self.historical_data and isinstance(self.historical_data[symbol], list):
-            #     return [
-            #         c for c in self.historical_data[symbol]
-            #         if getattr(c, 'timestamp', None) >= from_date and getattr(c, 'timestamp', None) <= to_date
-            #     ]
-            return [] 
-        else:
-            self.logger.error("get_historical_candles: historical_data is not set or is not a HistoricalDataManager instance with get_data method.")
-            return []
+    def get_historical_data(self, symbol: str, timeframe: str, 
+                            start_date: datetime, end_date: datetime) -> Optional[List[Dict[str, Any]]]:
+        """
+        Mock method to return historical data.
+        If self.historical_data is a dict {symbol: [list_of_candle_dicts_or_objects]}, it filters from there.
+        Otherwise, returns a default mock data structure or empty list.
+        The HistoricalDataManager expects a DataFrame, but this mock can return list of dicts
+        which HDM would then convert. Or this can directly return a DataFrame.
+        For simplicity with test_engine.py providing sample_candles (list of Candle objects),
+        this method will filter that if available.
+        """
+        self.logger.info(f"MockFyersClient: get_historical_data called for {symbol} from {start_date} to {end_date}.")
+        
+        data_to_return = []
+        
+        if isinstance(self.historical_data, dict) and symbol in self.historical_data:
+            # Assuming self.historical_data is like data_feeds: {symbol: [Candle_objects]}
+            all_symbol_candles = self.historical_data.get(symbol, [])
+            
+            for candle_obj in all_symbol_candles:
+                candle_timestamp = getattr(candle_obj, 'timestamp', None)
+                if candle_timestamp and start_date <= candle_timestamp <= end_date:
+                    # Convert Candle object to dict as broker APIs often return list of dicts
+                    data_to_return.append({
+                        "timestamp": candle_timestamp,
+                        "open": getattr(candle_obj, 'open', 0),
+                        "high": getattr(candle_obj, 'high', 0),
+                        "low": getattr(candle_obj, 'low', 0),
+                        "close": getattr(candle_obj, 'close', 0),
+                        "volume": getattr(candle_obj, 'volume', 0),
+                        "symbol": symbol, # Add symbol and timeframe for completeness
+                        "timeframe": timeframe
+                    })
+            self.logger.info(f"MockFyersClient: Returning {len(data_to_return)} pre-loaded bars for {symbol}.")
+            return data_to_return
+        
+        # Fallback: If no specific data is pre-loaded for the symbol, generate some generic mock data
+        # This part is more for if MockFyersClient is used without pre-loaded data.
+        # For test_engine.py, the pre-loaded path should be taken.
+        self.logger.warning(f"MockFyersClient: No pre-loaded data for {symbol}. Generating generic data.")
+        dates = pd.date_range(start_date, end_date, freq='D') # Assuming daily for generic
+        if not len(dates): return []
+        
+        for date_ts in dates:
+            data_to_return.append({
+                "timestamp": date_ts,
+                "open": random.uniform(90,100),
+                "high": random.uniform(100,110),
+                "low": random.uniform(80,90),
+                "close": random.uniform(90,100),
+                "volume": random.randint(1000,10000),
+                "symbol": symbol,
+                "timeframe": timeframe
+            })
+        return data_to_return
 
-    def get_current_bar(self, symbol: str) -> 'Candle | None':
+    def get_current_bar(self, symbol: str) -> Any: # Returns 'Candle | None'
         bar = self.current_bars.get(symbol)
         if bar is None:
             self.logger.warning(f"No current bar data available for symbol: {symbol}")

@@ -1,6 +1,60 @@
 import unittest
 import datetime
 import logging
+
+# --- Preamble to resolve 'algo_trading_framework.src' to 'src' ---
+import sys
+import os
+from unittest.mock import MagicMock
+
+MOCK_ALGO_FRAMEWORK_NAME = 'algo_trading_framework'
+MOCK_ALGO_FRAMEWORK_SRC_NAME = 'algo_trading_framework.src'
+
+try:
+    import src 
+    
+    if MOCK_ALGO_FRAMEWORK_NAME not in sys.modules:
+        mock_algo_pkg = MagicMock(name=MOCK_ALGO_FRAMEWORK_NAME + "_mock")
+        sys.modules[MOCK_ALGO_FRAMEWORK_NAME] = mock_algo_pkg
+    else:
+        mock_algo_pkg = sys.modules[MOCK_ALGO_FRAMEWORK_NAME]
+
+    if not hasattr(mock_algo_pkg, 'src') or isinstance(getattr(mock_algo_pkg, 'src', None), MagicMock):
+      mock_algo_pkg.src = src
+    
+    if MOCK_ALGO_FRAMEWORK_SRC_NAME not in sys.modules or isinstance(sys.modules[MOCK_ALGO_FRAMEWORK_SRC_NAME], MagicMock):
+      sys.modules[MOCK_ALGO_FRAMEWORK_SRC_NAME] = src
+
+    src_path_for_listing = os.path.dirname(src.__file__)
+    for item_name in os.listdir(src_path_for_listing):
+        item_path = os.path.join(src_path_for_listing, item_name)
+        module_name_for_import = None
+        if os.path.isdir(item_path) and "__init__.py" in os.listdir(item_path):
+            module_name_for_import = item_name
+        elif item_name.endswith('.py') and not item_name.startswith('__'):
+            module_name_for_import = item_name[:-3]
+        
+        if module_name_for_import:
+            actual_src_module_path = f"src.{module_name_for_import}"
+            mocked_framework_module_path = f"{MOCK_ALGO_FRAMEWORK_SRC_NAME}.{module_name_for_import}"
+            try:
+                imported_actual_submodule = __import__(actual_src_module_path, fromlist=[module_name_for_import])
+                setattr(mock_algo_pkg.src, module_name_for_import, imported_actual_submodule)
+                if mocked_framework_module_path not in sys.modules or isinstance(sys.modules[mocked_framework_module_path], MagicMock):
+                    sys.modules[mocked_framework_module_path] = imported_actual_submodule
+            except ImportError:
+                if mocked_framework_module_path not in sys.modules:
+                    sys.modules[mocked_framework_module_path] = MagicMock(name=mocked_framework_module_path + "_mock")
+                if hasattr(mock_algo_pkg.src, module_name_for_import) and isinstance(getattr(mock_algo_pkg.src, module_name_for_import, None), MagicMock) and getattr(mock_algo_pkg.src, module_name_for_import) is not sys.modules[mocked_framework_module_path] : # type: ignore
+                    setattr(mock_algo_pkg.src, module_name_for_import, sys.modules[mocked_framework_module_path])
+except ImportError as e:
+    print(f"CRITICAL ERROR in test preamble for {__file__}: Could not import 'src' package directly. Error: {e}.")
+    if MOCK_ALGO_FRAMEWORK_NAME not in sys.modules:
+        sys.modules[MOCK_ALGO_FRAMEWORK_NAME] = MagicMock(name=MOCK_ALGO_FRAMEWORK_NAME + "_critical_fallback_mock")
+    if MOCK_ALGO_FRAMEWORK_SRC_NAME not in sys.modules:
+        sys.modules[MOCK_ALGO_FRAMEWORK_SRC_NAME] = MagicMock(name=MOCK_ALGO_FRAMEWORK_SRC_NAME + "_critical_fallback_mock")
+# --- End Preamble ---
+
 import random # Import random
 
 from src.backtester.engine import BacktesterEngine
@@ -50,14 +104,20 @@ class TestBacktesterEngineIntegration(unittest.TestCase):
             ))
         
         data_feeds = {self.symbol: self.sample_candles}
-        self.hdm = HistoricalDataManager()
-        self.hdm.load_data(data_feeds)
+        # First, initialize the broker, as HDM might need it
         
+        # data_feeds is {self.symbol: self.sample_candles}
+        # Initialize MockFyersClient with the actual sample_candles data
         self.broker = MockFyersClient(
-            historical_data=self.hdm, # Pass HDM instance
+            historical_data=data_feeds, # Pass data_feeds here
             initial_cash=self.initial_cash, 
-            commission_rate=0.001 # 0.1% commission
+            commission_rate=0.001 
         )
+        # HistoricalDataManager will use this broker to "fetch" data
+        self.hdm = HistoricalDataManager(broker_client=self.broker) 
+        # No self.hdm.load_data(data_feeds) call needed.
+        # No need to set self.broker.historical_data_manager = self.hdm,
+        # as MockFyersClient doesn't use HDM; HDM uses the broker.
         
         # Strategy config: short_window=3, long_window=7 to ensure crossovers with ~30 days of data
         strategy_config = {
