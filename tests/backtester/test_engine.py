@@ -217,9 +217,14 @@ class TestBacktesterEngineIntegration(unittest.TestCase):
                 if pos_qty == 0: continue
 
                 # Use the close of the last bar for this symbol for final valuation
-                last_bar_for_pos = self.hdm.get_bar_at(pos_symbol, last_event_timestamp) # Timeframe ignored by current HDM
-                
-                last_price_for_valuation = pos_dict.get('last_price', 0.0) # Fallback to position's last known price
+                last_bar_for_pos = None
+                if pos_symbol == self.symbol and self.sample_candles and last_event_timestamp == self.sample_candles[-1].timestamp:
+                    last_bar_for_pos = self.sample_candles[-1]
+                # else:
+                #    # Optional: log a warning if symbols don't match, though current test setup implies they will.
+                #    logging.warning(f"Symbol mismatch or timestamp issue: pos_symbol={pos_symbol}, last_event_timestamp={last_event_timestamp}")
+
+                last_price_for_valuation = pos_dict.get('last_price', 0.0) # Fallback
                 if last_bar_for_pos and hasattr(last_bar_for_pos, 'close'):
                     last_price_for_valuation = last_bar_for_pos.close
                 

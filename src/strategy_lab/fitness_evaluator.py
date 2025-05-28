@@ -150,7 +150,7 @@ class FitnessEvaluator:
             
             engine = BacktesterEngine(
                 strategy=strategy_instance, broker=broker, historical_data_manager=hdm,
-                symbols_to_trade=[symbol], timeframe=timeframe_value,
+                symbols=[symbol], timeframe=timeframe_value,
                 start_date=start_date, end_date=end_date
             )
         except Exception as e:

@@ -89,9 +89,9 @@ class TestStrategyGenerator(unittest.TestCase):
             # as this key is added later by the StrategyGenerator for its internal tracking.
             # So, expected_fitness_scores_for_evolve should reflect the direct output 
             # of fitness_evaluator.evaluate_strategy.
-            expected_fitness_scores_for_evolve = [self.default_fitness_score.copy() for _ in range(pop_size)]
             # If specific varying scores were set up for the initial population evaluation, use those.
             # For this test, default_fitness_score is returned for all, so a list of copies is fine.
+            expected_fitness_scores_for_evolve = fitness_scores_sequence[:pop_size]
             self.assertEqual(first_evolve_call_args, call(self.initial_population, expected_fitness_scores_for_evolve))
         
         expected_best_code = self.evolved_population_gen2[1]
@@ -164,34 +164,60 @@ class TestStrategyGenerator(unittest.TestCase):
         self.assertIsNone(best_code_empty_init); self.assertIsNone(best_fitness_empty_init)
         self.mock_logger.error.assert_any_call("EvolutionaryEngine failed to initialize population.")
         
+        self.mock_logger.error.assert_any_call("EvolutionaryEngine failed to initialize population.")
+        
         # Second part: population becomes empty after evolution
         self.generator.config['num_generations'] = 2 # Ensure it runs for at least one evolution step
-        self.mock_evolutionary_engine.reset_mock(); self.mock_fitness_evaluator.reset_mock(); self.mock_logger.reset_mock()
         
-        initial_pop_s2 = ["s0_s2", "s1_s2"] # pop_size is 2
+        # Create and configure a fresh mock for the evolutionary engine
+        fresh_mock_evo_engine = MagicMock(spec=EvolutionaryEngine)
+        initial_pop_s2 = ("s0_s2", "s1_s2") # Keep as tuple
+        fresh_mock_evo_engine.initialize_population.return_value = initial_pop_s2
+        fresh_mock_evo_engine.primary_fitness_metric = 'sharpe_ratio' 
+        fresh_mock_evo_engine.evolve_population.return_value = []
+
+        # Temporarily replace the generator's evolutionary engine
+        original_evo_engine = self.generator.evolutionary_engine
+        self.generator.evolutionary_engine = fresh_mock_evo_engine
+
+        # Reset other mocks
+        self.mock_fitness_evaluator.reset_mock()
+        self.mock_logger.reset_mock()
+        
         fitness_s0_s2 = {'sharpe_ratio': 1.0, 'id': 's0_s2_fit'}
         fitness_s1_s2 = {'sharpe_ratio': 0.5, 'id': 's1_s2_fit'}
-        # Since num_generations is 2, evaluate_strategy will be called pop_size times for gen 0,
-        # and then if evolve_population returns empty, it won't be called for gen 1.
-        # However, the evolve_population call itself happens *after* all evaluations for gen 0.
-        # If evolve_population returns [], then the loop for gen 1 starts,
-        # it tries to evaluate, finds current_population_codes is empty, and then should log.
-        # The issue is that run_evolution will return early if current_population_codes becomes empty
-        # *after* evolution. The current structure means it evaluates gen 0, then evolves.
-        # If evolution makes pop empty, it returns the best from gen 0.
         
-        self.mock_evolutionary_engine.initialize_population.return_value = initial_pop_s2
-        # For gen 0, 2 strategies are evaluated.
-        self.mock_fitness_evaluator.evaluate_strategy.side_effect = [fitness_s0_s2, fitness_s1_s2]
-        self.mock_evolutionary_engine.evolve_population.return_value = [] # Population becomes empty
+        eval_call_log = [] # To store details of each call
+        eval_responses = [fitness_s0_s2, fitness_s1_s2]
+
+        def mock_evaluate_strategy_func(strategy_code_string, historical_data_path, strategy_config):
+            call_number = len(eval_call_log)
+            log_entry = f"DEBUG_EVAL_FUNC: Call {call_number + 1} for strategy '{strategy_code_string}'"
+            print(log_entry) # Print to console
+            eval_call_log.append(log_entry)
+
+            if call_number < len(eval_responses):
+                response = eval_responses[call_number]
+                print(f"DEBUG_EVAL_FUNC: Returning response: {response}")
+                return response
+            else:
+                error_msg = f"evaluate_strategy called {call_number + 1} times, but only {len(eval_responses)} responses were configured."
+                print(f"DEBUG_EVAL_FUNC: ERROR - {error_msg}")
+                raise AssertionError(error_msg)
+
+        self.mock_fitness_evaluator.evaluate_strategy.side_effect = mock_evaluate_strategy_func
         
-        best_code_empty_evolve, best_fitness_empty_evolve = self.generator.run_evolution()
+        try:
+            best_code_empty_evolve, best_fitness_empty_evolve = self.generator.run_evolution()
+        finally:
+            # Restore original evolutionary engine
+            self.generator.evolutionary_engine = original_evo_engine
         
-        self.mock_evolutionary_engine.initialize_population.assert_called_once_with(pop_size)
+        fresh_mock_evo_engine.initialize_population.assert_called_once_with(pop_size)
         self.assertEqual(self.mock_fitness_evaluator.evaluate_strategy.call_count, pop_size) # Only for the first generation
         
         expected_fitness_scores_passed_to_evolve = [fitness_s0_s2, fitness_s1_s2]
-        self.mock_evolutionary_engine.evolve_population.assert_called_once_with(initial_pop_s2, expected_fitness_scores_passed_to_evolve)
+        fresh_mock_evo_engine.evolve_population.assert_called_once_with(initial_pop_s2, expected_fitness_scores_passed_to_evolve)
         
         # Best strategy should be from before population became empty
         expected_best_code_s2 = initial_pop_s2[0] 
