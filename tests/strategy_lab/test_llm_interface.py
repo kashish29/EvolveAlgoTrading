@@ -1,26 +1,32 @@
 import unittest
-from algo_trading_framework.src.strategy_lab.llm_interface import MockLLMInterface
+from unittest.mock import MagicMock 
+from src.strategy_lab.llm_interface import MockLLMInterface, EVOLVED_STRATEGY_TEMPLATE # Import template for comparison
 
 class TestMockLLMInterface(unittest.TestCase):
 
     def setUp(self):
         self.llm_interface = MockLLMInterface()
+        self.evolved_strategy_template = EVOLVED_STRATEGY_TEMPLATE
 
-    def test_generate_strategy_code(self):
+    def test_generate_initial_strategy(self): # Renamed test method
         prompt = "Create a simple RSI strategy."
-        code = self.llm_interface.generate_strategy_code(prompt)
+        code = self.llm_interface.generate_initial_strategy(prompt) # Calls existing method
         self.assertIsInstance(code, str)
-        self.assertTrue(len(code) > 50) # Expect some meaningful code string
-        self.assertIn(prompt, code) # Mock includes prompt in output
+        self.assertTrue(len(code) > 50) 
+        # The mock generate_initial_strategy returns the EVOLVED_STRATEGY_TEMPLATE
+        self.assertEqual(code, self.evolved_strategy_template)
+        # The print statement in the mock includes the prompt, but the return value does not.
+        # If we wanted to check the prompt interaction, we'd need to capture stdout or have the mock return it.
 
-    def test_mutate_strategy_code(self):
+    def test_refine_strategy_code(self): # Renamed test method
         initial_code = "class MyStrategy: pass"
-        prompt = "Add a parameter for window size."
-        mutated_code = self.llm_interface.mutate_strategy_code(initial_code, prompt)
-        self.assertIsInstance(mutated_code, str)
-        self.assertIn(initial_code, mutated_code) # Original code should be part of it
-        # Mock LLM adds a comment that includes "mutated", let's check for that
-        self.assertTrue("mutated" in mutated_code or "Mutated" in mutated_code or "# Code mutated" in mutated_code)
+        feedback = "Add a parameter for window size."
+        refined_code = self.llm_interface.refine_strategy_code(initial_code, feedback) # Calls existing method
+        self.assertIsInstance(refined_code, str)
+        self.assertIn(initial_code, refined_code) 
+        # Mock refine_strategy_code appends a comment with the feedback.
+        expected_refinement_comment = f"# LLM Mock Refinement: Based on feedback - {feedback}"
+        self.assertIn(expected_refinement_comment, refined_code)
 
 
     def test_combine_strategy_codes(self):
@@ -30,10 +36,10 @@ class TestMockLLMInterface(unittest.TestCase):
         combined_code = self.llm_interface.combine_strategy_codes(code_a, code_b, prompt)
         self.assertIsInstance(combined_code, str)
         self.assertIn(code_a, combined_code)
-        # The mock combine_strategy_codes might not include code_b directly in the top-level class it creates
-        # but it should be mentioned in comments or be part of the string.
-        self.assertIn("Strategy B", combined_code) # Check for mention of Strategy B
-        self.assertIn("CombinedStrategy", combined_code) # Mock creates a combined class
+        self.assertIn(code_b, combined_code) # Mock concatenates them
+        # Mock combine_strategy_codes includes the prompt in a comment.
+        expected_combination_comment = f"# --- Combined by MockLLMInterface based on: {prompt} ---"
+        self.assertIn(expected_combination_comment, combined_code)
 
 if __name__ == '__main__':
     unittest.main()

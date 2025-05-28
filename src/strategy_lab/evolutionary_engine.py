@@ -4,13 +4,14 @@ from typing import List, Dict, Any, Optional, Tuple
 
 DEFAULT_STRATEGY_TEMPLATE = """
 import logging
-from algo_trading_framework.src.strategies.base_strategy import BaseStrategy
-from algo_trading_framework.src.core.models import Order, OrderType, OrderSide, Candle
+# BaseStrategy will be injected into the execution scope by FitnessEvaluator
+# from src.strategies.base_strategy import BaseStrategy 
+from src.core.models import Order, OrderType, OrderSide, Candle
 from typing import TYPE_CHECKING, Dict, List
 import random
 
 if TYPE_CHECKING:
-    from algo_trading_framework.src.broker_api.base_broker_client import BaseBrokerClient
+    from src.broker_api.base_broker_client import BaseBrokerClient
 
 class EvolvedStrategy(BaseStrategy):
     def __init__(self, strategy_id: str, broker: 'BaseBrokerClient', config: dict = None):
@@ -102,48 +103,47 @@ class EvolvedStrategy(BaseStrategy):
 class EvolutionaryEngine:
     def __init__(self,
                  initial_strategy_template: str = DEFAULT_STRATEGY_TEMPLATE,
-                 llm_interface: Optional[Any] = None, # Placeholder for future use
+                 llm_interface: Optional[Any] = None, 
                  primary_fitness_metric: str = "sharpe_ratio",
                  tournament_size: int = 3,
                  elitism_count: int = 1,
                  mutation_probability: float = 0.1):
         self.initial_strategy_template = initial_strategy_template
-        self.llm_interface = llm_interface # Currently unused
+        self.llm_interface = llm_interface 
         self.primary_fitness_metric = primary_fitness_metric
         self.tournament_size = tournament_size
         self.elitism_count = elitism_count
         self.mutation_probability = mutation_probability
         self.param_ranges = {
-            "short_window": (3, 20), # min_val, max_val
+            "short_window": (3, 20), 
             "long_window": (10, 50),
             "quantity": (1, 10)
         }
 
     def _change_param_in_code(self, code_string: str, param_name: str, new_value: int) -> str:
-        # Priority 1: self.param_name = self.config.get("param_name", DEFAULT_VALUE)
         pattern_config = re.compile(f'(self\.{param_name}\s*=\s*self\.config\.get\s*\(\s*"{param_name}"\s*,\s*)(\d+)(\s*\))')
-        code_string, count_config = pattern_config.sub(rf'\g<1>{new_value}\g<3>', code_string, count=1)
+        original_code_string = code_string
+        code_string = pattern_config.sub(rf'\g<1>{new_value}\g<3>', code_string, count=1)
+        count_config = 1 if original_code_string != code_string else 0
         
         if count_config == 0:
-            # Priority 2: self.param_name = VALUE
             pattern_direct = re.compile(f'(self\.{param_name}\s*=\s*)(\d+)')
-            code_string, count_direct = pattern_direct.sub(rf'\g<1>{new_value}', code_string, count=1)
+            original_code_string = code_string
+            code_string = pattern_direct.sub(rf'\g<1>{new_value}', code_string, count=1)
+            count_direct = 1 if original_code_string != code_string else 0
             if count_direct == 0:
-                print(f"Warning: Param {param_name} not updated by _change_param_in_code in code snippet.")
+                pass
         return code_string
 
     def _get_param_from_code(self, code_string: str, param_name: str) -> Optional[int]:
-        # Priority 1: self.param_name = self.config.get("param_name", VALUE)
         match_config = re.search(f'self\.{param_name}\s*=\s*self\.config\.get\s*\(\s*"{param_name}"\s*,\s*(\d+)\s*\)', code_string)
         if match_config:
             return int(match_config.group(1))
         
-        # Priority 2: self.param_name = VALUE
         match_direct = re.search(f'self\.{param_name}\s*=\s*(\d+)', code_string)
         if match_direct:
             return int(match_direct.group(1))
         
-        # print(f"Warning: Param {param_name} not found by _get_param_from_code in code snippet.")
         return None
 
     def initialize_population(self, size: int) -> List[str]:
@@ -151,24 +151,35 @@ class EvolutionaryEngine:
         for _ in range(size):
             strategy_code = str(self.initial_strategy_template)
             
-            # Adjust short_window first, ensuring it's low enough to allow a valid long_window
+            # Generate short_window first.
+            # It must be low enough to allow a valid long_window (sw < lw).
+            # And respect its own min/max defined in param_ranges.
             new_sw = random.randint(*self.param_ranges["short_window"])
-            if new_sw >= self.param_ranges["long_window"][1]: # Ensure sw can allow lw to be greater
-                 new_sw = self.param_ranges["long_window"][1] - 1 
-            new_sw = max(self.param_ranges["short_window"][0], new_sw) # Ensure sw is not below its own min
+            if new_sw >= self.param_ranges["long_window"][1]: # e.g. if sw=50 and max_lw=50
+                 new_sw = self.param_ranges["long_window"][1] - 1 # Adjust sw down to allow lw to be sw+1
+            new_sw = max(self.param_ranges["short_window"][0], new_sw) # Ensure sw doesn't go below its defined minimum.
 
             strategy_code = self._change_param_in_code(strategy_code, "short_window", new_sw)
 
-            # Adjust long_window
-            min_lw = new_sw + 1
-            max_lw = self.param_ranges["long_window"][1]
-            if min_lw > max_lw : # Should not happen if new_sw was adjusted correctly
-                min_lw = max_lw # Fallback, ensures randint doesn't fail
+            # Generate long_window, ensuring it's greater than new_sw and within its own defined range.
+            # Effective minimum for long_window is the greater of (short_window + 1) or its configured global minimum.
+            min_lw_based_on_sw = new_sw + 1
+            min_lw_from_range = self.param_ranges["long_window"][0]
+            min_lw_val = max(min_lw_based_on_sw, min_lw_from_range)
             
-            new_lw = random.randint(min_lw, max_lw)
+            max_lw_val = self.param_ranges["long_window"][1] # Configured global maximum for long_window
+
+            # If the calculated effective min_lw_val somehow exceeds max_lw_val,
+            # (e.g., if new_sw is very high, pushing new_sw + 1 > max_lw_val,
+            # and min_lw_from_range is also problematic, or max_lw_val is too small).
+            # Clamp min_lw_val to max_lw_val, forcing new_lw to be max_lw_val.
+            if min_lw_val > max_lw_val : 
+                min_lw_val = max_lw_val # This ensures randint range is valid, e.g. randint(50,50)
+            
+            new_lw = random.randint(min_lw_val, max_lw_val)
             strategy_code = self._change_param_in_code(strategy_code, "long_window", new_lw)
 
-            # Adjust quantity
+            # Generate quantity within its defined range.
             new_qty = random.randint(*self.param_ranges["quantity"])
             strategy_code = self._change_param_in_code(strategy_code, "quantity", new_qty)
             
@@ -177,7 +188,6 @@ class EvolutionaryEngine:
 
     def select_parents(self, population: List[str], fitness_scores: List[Dict[str, Any]]) -> List[str]:
         if not population or not fitness_scores or len(population) != len(fitness_scores):
-            # Fallback: if inputs are problematic, return original population or empty list
             return population if population else []
 
         pop_with_fitness = list(zip(population, fitness_scores))
@@ -200,30 +210,43 @@ class EvolutionaryEngine:
         return parents
 
     def crossover(self, parent1_code: str, parent2_code: str) -> str:
-        sw1 = self._get_param_from_code(parent1_code, "short_window")
-        if sw1 is None: sw1 = random.randint(*self.param_ranges["short_window"])
+        # Parameters for the offspring are taken from parents:
+        # - short_window from parent1
+        # - long_window from parent2
+        # - quantity from parent1
+        parent1_sw = self._get_param_from_code(parent1_code, "short_window")
+        if parent1_sw is None: parent1_sw = random.randint(*self.param_ranges["short_window"])
 
-        lw2 = self._get_param_from_code(parent2_code, "long_window")
-        if lw2 is None: lw2 = random.randint(*self.param_ranges["long_window"])
+        parent2_lw = self._get_param_from_code(parent2_code, "long_window")
+        if parent2_lw is None: parent2_lw = random.randint(*self.param_ranges["long_window"])
         
-        qty1 = self._get_param_from_code(parent1_code, "quantity")
-        if qty1 is None: qty1 = random.randint(*self.param_ranges["quantity"])
+        parent1_qty = self._get_param_from_code(parent1_code, "quantity")
+        if parent1_qty is None: parent1_qty = random.randint(*self.param_ranges["quantity"])
 
-        # Constraint Check for long_window vs short_window
-        if lw2 <= sw1:
-            min_lw_val = sw1 + 1
-            max_lw_val = self.param_ranges["long_window"][1]
-            if min_lw_val > max_lw_val: # sw1 is too high
-                 sw1 = max_lw_val -1 # adjust sw1 down
-                 sw1 = max(self.param_ranges["short_window"][0], sw1) # ensure sw1 respects its min
-                 min_lw_val = sw1 + 1
+        # Ensure the constraint long_window > short_window is met for the offspring.
+        # Offspring will have short_window from parent1 (parent1_sw) and long_window from parent2 (parent2_lw).
+        offspring_sw = parent1_sw
+        offspring_lw = parent2_lw
 
-            lw2 = random.randint(min_lw_val, max_lw_val)
+        if offspring_lw <= offspring_sw:
+            # If parent2's long_window is not greater than parent1's short_window, adjust.
+            min_possible_lw = offspring_sw + 1
+            max_possible_lw = self.param_ranges["long_window"][1]
+            
+            if min_possible_lw > max_possible_lw: 
+                 # This means offspring_sw is already at max_possible_lw - 1 or higher.
+                 # Adjust offspring_sw downwards to allow for a valid offspring_lw.
+                 offspring_sw = max_possible_lw -1 
+                 offspring_sw = max(self.param_ranges["short_window"][0], offspring_sw) # Ensure sw doesn't go below its global min
+                 min_possible_lw = offspring_sw + 1 # Re-calculate min_possible_lw based on new offspring_sw
+            
+            # Set offspring_lw to a random value within the valid adjusted range.
+            offspring_lw = random.randint(min_possible_lw, max_possible_lw)
             
         offspring_code = str(self.initial_strategy_template)
-        offspring_code = self._change_param_in_code(offspring_code, "short_window", sw1)
-        offspring_code = self._change_param_in_code(offspring_code, "long_window", lw2)
-        offspring_code = self._change_param_in_code(offspring_code, "quantity", qty1)
+        offspring_code = self._change_param_in_code(offspring_code, "short_window", offspring_sw)
+        offspring_code = self._change_param_in_code(offspring_code, "long_window", offspring_lw)
+        offspring_code = self._change_param_in_code(offspring_code, "quantity", parent1_qty) # quantity from parent1
         
         return offspring_code
 
@@ -235,24 +258,39 @@ class EvolutionaryEngine:
 
         if param_to_mutate == "short_window":
             current_lw = self._get_param_from_code(code_copy, "long_window") or self.param_ranges["long_window"][0]
-            max_sw = current_lw - 1
-            min_sw = self.param_ranges["short_window"][0]
-            if max_sw < min_sw: max_sw = min_sw # Ensure randint range is valid
-            new_val = random.randint(min_sw, max_sw)
+            min_sw_val = self.param_ranges["short_window"][0]
+            max_sw_val = current_lw - 1
+
+            # Ensure the calculated max_sw_val is not less than min_sw_val.
+            if max_sw_val < min_sw_val:
+                max_sw_val = min_sw_val 
+            
+            # Apply clamping to the new_val.
+            if new_val < min_sw_val:
+                new_val = min_sw_val
+            if new_val > max_sw_val: 
+                new_val = max_sw_val
 
         elif param_to_mutate == "long_window":
             current_sw = self._get_param_from_code(code_copy, "short_window") or self.param_ranges["short_window"][0]
-            min_lw = current_sw + 1
-            max_lw = self.param_ranges["long_window"][1]
-            if min_lw > max_lw: min_lw = max_lw # Ensure randint range is valid
-            new_val = random.randint(min_lw, max_lw)
+            min_lw_val = current_sw + 1
+            max_lw_val = self.param_ranges["long_window"][1]
+
+            # Ensure the calculated min_lw_val is not greater than max_lw_val.
+            if min_lw_val > max_lw_val:
+                min_lw_val = max_lw_val
+            
+            # Apply clamping to the new_val.
+            if new_val < min_lw_val:
+                new_val = min_lw_val
+            if new_val > max_lw_val:
+                new_val = max_lw_val
             
         mutated_code = self._change_param_in_code(code_copy, param_to_mutate, new_val)
         return mutated_code
 
     def evolve_population(self, population: List[str], fitness_scores: List[Dict[str, Any]]) -> List[str]:
         if not population or not fitness_scores or len(population) != len(fitness_scores):
-             # If inputs are problematic, return the original population or an empty list.
             return population if population else []
 
         next_generation = []
@@ -260,31 +298,35 @@ class EvolutionaryEngine:
         pop_with_fitness = []
         for i, p_code in enumerate(population):
             fit_val = fitness_scores[i].get(self.primary_fitness_metric, -float('inf'))
-            if not isinstance(fit_val, (int, float)) or fit_val != fit_val: # Handles NaN
+            if not isinstance(fit_val, (int, float)) or fit_val != fit_val: 
                 fit_val = -float('inf')
             pop_with_fitness.append((p_code, fit_val))
         
         pop_with_fitness.sort(key=lambda x: x[1], reverse=True)
         
-        # Elitism
         elite_count = min(self.elitism_count, len(pop_with_fitness))
         for i in range(elite_count):
             next_generation.append(pop_with_fitness[i][0])
-            
-        # Parent Selection
-        selected_parents = self.select_parents(population, fitness_scores)
-        if not selected_parents: # Fallback if tournament selection yields nothing
-            if pop_with_fitness: # Use best individuals from sorted list
-                selected_parents = [p[0] for p in pop_with_fitness[:max(1, len(pop_with_fitness))]]
-            else: # Should not happen if initial checks passed, but as a safeguard
-                return next_generation if next_generation else population
 
-        if not selected_parents: # If still no parents, can't proceed with crossover/mutation
-             return next_generation if next_generation else population
-
-
-        # Crossover and Mutation
         num_offspring_needed = len(population) - len(next_generation)
+
+        if num_offspring_needed == 0:
+            return next_generation
+            
+        selected_parents = self.select_parents(population, fitness_scores)
+        if not selected_parents: 
+            if pop_with_fitness: 
+                potential_parents = [p[0] for p in pop_with_fitness]
+                # Ensure we have enough parents if possible, even if it means duplicates for small diverse populations
+                selected_parents = [random.choice(potential_parents) for _ in range(num_offspring_needed * 2)] if potential_parents else []
+                if not selected_parents: 
+                     return next_generation 
+            else: 
+                return next_generation 
+
+        if not selected_parents: 
+             return next_generation
+
         for _ in range(num_offspring_needed):
             parent1 = random.choice(selected_parents)
             parent2 = random.choice(selected_parents)
@@ -299,6 +341,7 @@ class EvolutionaryEngine:
         return next_generation
 
 if __name__ == '__main__':
+    # ... (rest of the __main__ block unchanged) ...
     print("--- EvolutionaryEngine Test ---")
     engine = EvolutionaryEngine(
         tournament_size=3,
@@ -445,7 +488,9 @@ if __name__ == '__main__':
     mutated_strat_lw = engine.mutate(strat_mutate_lw) # Mutate, hoping it hits long_window
     sw_mut_lw = engine._get_param_from_code(mutated_strat_lw, 'short_window')
     lw_mut_lw = engine._get_param_from_code(mutated_strat_lw, 'long_window')
-    print(f"Mutated LW: Original SW=48, New SW={sw_mut_lw} (SW may also change), New LW={lw_mut_lw}")
+    print(f"Mutated LW: Original SW={48}, New SW={sw_mut_lw} (SW may also change), New LW={lw_mut_lw}")
     if engine._get_param_from_code(strat_mutate_lw, "short_window") == sw_mut_lw and sw_mut_lw is not None and lw_mut_lw is not None: # if SW wasn't mutated
          assert sw_mut_lw < lw_mut_lw, f"Mutate LW Constraint failed: SW={sw_mut_lw} not less than LW={lw_mut_lw}"
     print("--- Mutate edge case test complete ---")
+
+[end of src/strategy_lab/evolutionary_engine.py]

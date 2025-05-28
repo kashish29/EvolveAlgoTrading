@@ -1,117 +1,72 @@
 # Strategy Lab Module (`src/strategy_lab/`)
 
-The Strategy Lab module is dedicated to the AI-driven generation, evolution, and evaluation of trading strategies, inspired by concepts like AlphaEvolve. It aims to automate parts of the strategy discovery process.
+The Strategy Lab module is dedicated to the AI-driven generation, evolution, evaluation, and refinement of trading strategies. It aims to automate parts of the strategy discovery process, drawing inspiration from concepts like genetic algorithms and potentially leveraging Large Language Models (LLMs) for code manipulation.
 
-**Note: The current implementations in this module are MOCKS.** They simulate the behavior of the intended components but do not perform real AI operations, LLM calls, or rigorous backtesting for fitness. They serve to establish the architectural flow.
+## Overview and Workflow
 
-## Components:
+The Strategy Lab operates through the coordinated efforts of its main components: `StrategyGenerator`, `EvolutionaryEngine`, `FitnessEvaluator`, and an `LLMInterface` (currently implemented as `MockLLMInterface`).
 
-### `llm_interface.py`
-- **`MockLLMInterface`:**
-  - This class simulates interactions with a Large Language Model (LLM), providing a placeholder for future integration with actual AI-driven code generation and modification. All operations are currently mocked and do not involve real LLM calls.
-  - **Methods:**
-    - **`generate_initial_strategy(prompt: str) -> str`**:
-      - *Intended Role*: To generate a base strategy code string based on a given `prompt`. This strategy would serve as an initial seed or template for the evolutionary process.
-      - *Current Mock Implementation*: Ignores the `prompt` and returns a hardcoded strategy string (the `EvolvedStrategy` template, which is a moving average crossover strategy).
-    - **`refine_strategy_code(code: str, feedback: str) -> str`**:
-      - *Intended Role*: To simulate an LLM refining an existing strategy `code` string based on textual `feedback` (e.g., suggestions for improvement, error messages).
-      - *Current Mock Implementation*: Appends the `feedback` as a Python comment to the end of the provided `code` string. It does not perform any actual code analysis or modification.
-    - **`combine_strategy_codes(code_a: str, code_b: str, prompt: str) -> str`**:
-      - *Intended Role*: To simulate an LLM combining two separate strategy code strings (`code_a`, `code_b`) into a single, potentially synergistic strategy, guided by a `prompt`.
-      - *Current Mock Implementation*: Performs a simple string concatenation of `code_a` and `code_b`, separated by a comment indicating the mock combination and the guiding `prompt`.
-  - **Overall Purpose:**
-    - The `MockLLMInterface` defines the *intended interface* for how other components in the Strategy Lab (like `StrategyGenerator` or potentially `EvolutionaryEngine` in the future) would interact with an LLM.
-    - In a real system, these methods would be replaced with actual calls to an LLM API, involving prompt engineering, sending code/feedback, and parsing the LLM's response to extract usable strategy code.
+The typical workflow is as follows:
 
-### `fitness_evaluator.py`
-- **`FitnessEvaluator`:**
-  - Acts as the bridge between AI-generated strategy code and the backtesting engine. It takes raw strategy code, runs it through a backtest, and returns comprehensive performance metrics.
-  - **Primary Method:** `evaluate_strategy(self, strategy_code_string: str, historical_data_path: str, strategy_config: dict) -> dict`
-    - **Inputs:**
-      - `strategy_code_string (str)`: The Python code string of the trading strategy to be evaluated. The code should define a class named `EvolvedStrategy` or any class that inherits from `BaseStrategy`.
-      - `historical_data_path (str)`: The file path to a CSV containing historical market data. The CSV must include 'timestamp', 'open', 'high', 'low', 'close', and 'volume' columns.
-      - `strategy_config (dict)`: A dictionary providing configuration for the strategy. This must include:
-        - `symbol (str)`: The trading symbol for the strategy (e.g., "SBIN-EQ").
-        - It can also include other parameters required by the strategy (e.g., `short_window`, `long_window`, `timeframe`). The `timeframe` defaults to `Timeframe.DAY_1` if not specified.
-    - **Outputs:**
-      - On successful evaluation, it returns a dictionary containing various performance metrics calculated by `src/backtester/metrics.py`. These can include Sharpe ratio, Sortino ratio, maximum drawdown, total return percentage, number of trades, win rate, profit factor, etc.
-      - In case of an error during any stage of evaluation (code execution, data loading, backtesting, metric calculation), the returned dictionary will contain an 'error' key with a descriptive message, and default pessimistic values for the metrics (e.g., `-float('inf')` for ratios, 0 for counts).
-  - **Process Overview:**
-    1.  **Dynamic Strategy Loading:** The `strategy_code_string` is executed using `exec()` to dynamically load the strategy class.
-    2.  **Data Preparation:** Historical data is loaded from the specified CSV path using `pandas`, converted into `Candle` objects, and managed by the `HistoricalDataManager`.
-    3.  **Backtester Setup:** A `MockFyersClient` (simulating broker interactions) and the `BacktesterEngine` are initialized. The dynamically loaded strategy is instantiated with its configuration and the broker.
-    4.  **Backtest Execution:** The `BacktesterEngine` runs the strategy over the historical data.
-    5.  **Metrics Calculation:** Post-backtest, performance metrics are computed using the `calculate_all_metrics` function based on the equity curve and trade log.
+1.  **Initialization**: The `StrategyGenerator` kicks off the process by instructing the `EvolutionaryEngine` to create an initial population of trading strategies.
+2.  **Strategy Representation**:
+    *   Strategies are represented as Python code strings.
+    *   The `EvolutionaryEngine` often uses a base template, `DEFAULT_STRATEGY_TEMPLATE` (defined within `evolutionary_engine.py`), to generate these initial strategies. This template is a fully functional strategy class inheriting from `BaseStrategy`.
+    *   Key parameters within this template (e.g., `self.short_window = self.config.get("short_window", 5)`, `self.long_window = ...`, `self.quantity = ...`) are treated as "genes." The `EvolutionaryEngine` modifies the values of these parameters directly within the code string during mutation and crossover.
+3.  **Fitness Evaluation (Generational Loop)**:
+    *   For each strategy (code string) in the current population, the `StrategyGenerator` tasks the `FitnessEvaluator` with assessing its performance.
+    *   The `FitnessEvaluator` dynamically loads and executes the strategy code. It then utilizes the main `Backtester` engine (from `src/backtester/engine.py`) to run the strategy against historical market data.
+    *   After the backtest, the `FitnessEvaluator` calculates a range of performance metrics (e.g., Sharpe Ratio, Total Return, Max Drawdown) using functionalities from `src/backtester/metrics.py`. These metrics form the "fitness score" of the strategy.
+4.  **Evolution (Generational Loop)**:
+    *   The `StrategyGenerator` collects the fitness scores for the entire population.
+    *   It then passes the population (list of code strings) and their fitness scores to the `EvolutionaryEngine`.
+    *   The `EvolutionaryEngine` applies genetic operators to produce the next generation of strategies:
+        *   **Selection**: Parents are chosen from the current population based on their fitness (e.g., using tournament selection).
+        *   **Crossover**: Selected parents are combined to create offspring strategies.
+        *   **Mutation**: Offspring strategies may undergo random modifications.
+5.  **LLM Refinement (Optional)**:
+    *   After the evolutionary cycles, or potentially at intermediate stages, the `StrategyGenerator` can optionally use the `LLMInterface` (currently `MockLLMInterface`) to refine promising strategy codes.
+    *   This involves sending the strategy code and a feedback prompt (e.g., based on its performance) to the LLM, which then (conceptually) returns a modified version of the code. The refined strategy is then re-evaluated.
+6.  **Iteration**: Steps 3 (Evaluation) and 4 (Evolution) are repeated for a configured number of generations. The `StrategyGenerator` tracks the best-performing strategy found throughout this entire process.
+7.  **Result**: Finally, the `StrategyGenerator` outputs the code of the overall best strategy and its associated fitness metrics.
 
-### `evolutionary_engine.py`
-- **`EvolutionaryEngine`:**
-  - Manages the population of trading strategies and applies evolutionary operators to generate new populations. It works with strategy code as strings and uses parameter manipulation for evolution.
-  - **Primary Methods & Responsibilities:**
-    - **`__init__(initial_strategy_template, llm_interface, primary_fitness_metric, tournament_size, elitism_count, mutation_probability)`**:
-      - Initializes the engine. Key configurations include:
-        - `initial_strategy_template (str)`: A template string for the strategy code (expected to define an `EvolvedStrategy` class).
-        - `llm_interface`: Placeholder for a future LLM interface for advanced operations (currently not used by `EvolutionaryEngine`).
-        - `primary_fitness_metric (str)`: The key to use in the fitness score dictionary for selection (e.g., "sharpe_ratio").
-        - `tournament_size (int)`: Number of individuals in a selection tournament.
-        - `elitism_count (int)`: Number of top individuals to carry over to the next generation.
-        - `mutation_probability (float)`: Probability of an offspring undergoing mutation.
-        - It also defines internal `param_ranges` for strategy parameters like `short_window`, `long_window`, and `quantity`.
-    - **`initialize_population(size: int) -> List[str]`**:
-      - Creates an initial population of `size` strategy code strings.
-      - Each strategy is a copy of the `initial_strategy_template` with its parameters (`short_window`, `long_window`, `quantity`) randomized within predefined ranges, ensuring `long_window > short_window`.
-    - **`select_parents(population: List[str], fitness_scores: List[Dict[str, Any]]) -> List[str]`**:
-      - Implements parent selection using tournament selection. It repeatedly samples a subset of the population (tournament) and selects the individual with the best `primary_fitness_metric` from that subset.
-    - **`crossover(parent1_code: str, parent2_code: str) -> str`**:
-      - (Currently Simplified) Combines two parent strategies to produce an offspring.
-      - The current implementation performs a one-point crossover by taking `short_window` and `quantity` from `parent1_code` and `long_window` from `parent2_code`. It ensures the `long_window > short_window` constraint in the offspring.
-    - **`mutate(strategy_code: str) -> str`**:
-      - (Currently Simplified) Makes small random changes to a strategy's parameters.
-      - It randomly selects one parameter (`short_window`, `long_window`, or `quantity`) and assigns it a new random value within its defined range, again ensuring `long_window > short_window`.
-    - **`evolve_population(population: List[str], fitness_scores: List[Dict[str, Any]]) -> List[str]`**:
-      - Orchestrates the creation of a new generation.
-      - It applies elitism (carrying over the best individuals), then uses `select_parents` to choose parents for the rest of the new population.
-      - Offspring are generated via `crossover` and then may undergo `mutate` based on `mutation_probability`.
-  - **Interactions & Current Nature:**
-    - It receives the current population (list of strategy code strings) and their corresponding `fitness_scores` (list of dictionaries, typically from `FitnessEvaluator` via `StrategyGenerator`).
-    - It outputs a new population (list of strategy code strings).
-    - The `llm_interface` is not currently used by `EvolutionaryEngine` for crossover or mutation.
-    - Crossover and mutation operators are currently simplified, focusing on manipulating numeric parameters (e.g., `short_window`, `long_window`, `quantity`) within the strategy code string using regular expressions. They do not yet perform structural code changes or utilize LLM guidance for more complex genetic operations.
+## Evolutionary Operators (Current Implementation)
+
+The `EvolutionaryEngine` currently implements the following simplified operators:
+
+*   **Crossover ("Parameter Swap" Logic)**:
+    *   When combining two parent strategy code strings, the offspring inherits parameters in a specific manner. For example, the offspring might receive its `short_window` and `quantity` values by parsing them from `parent1_code`, and its `long_window` value from `parent2_code`.
+    *   **Constraint Handling**: The crossover logic includes checks to ensure basic strategy viability, such as `long_window` being greater than `short_window`. If a direct swap violates such constraints, parameters are adjusted (e.g., `long_window` is set to `short_window + 1` or capped at its maximum allowed value).
+*   **Mutation ("Parameter Change" Logic)**:
+    *   A random parameter within the strategy code string (e.g., `short_window`, `long_window`, or `quantity`) is chosen.
+    *   Its value is changed to a new random integer selected from predefined ranges stored in `EvolutionaryEngine.param_ranges`.
+    *   **Constraint Handling**: Similar to crossover, mutation logic ensures that constraints like `long_window > short_window` are maintained. If a random change violates this, the mutated value is adjusted to satisfy the constraint (e.g., `short_window` is capped at `current_long_window - 1`, or `long_window` is floored at `current_short_window + 1`). Values are also clamped within their global min/max ranges.
+
+## Key Files & Components:
 
 ### `strategy_generator.py`
-- **`StrategyGenerator`:**
-  - Orchestrates the entire strategy evolution process, coordinating the `EvolutionaryEngine`, `FitnessEvaluator`, and `MockLLMInterface` (though the LLM interface is not actively used in the current evolution loop).
-  - **Primary Methods & Responsibilities:**
-    - **`__init__(self, fitness_evaluator: FitnessEvaluator, evolutionary_engine: EvolutionaryEngine, llm_interface: MockLLMInterface, config: dict)`**:
-      - Initializes the generator with instances of the other key Strategy Lab components: `FitnessEvaluator` and `EvolutionaryEngine`.
-      - It also takes a `MockLLMInterface` (for potential future use in more advanced strategy generation/mutation).
-      - A `config` dictionary is required, which must contain:
-        - `historical_data_path (str)`: Path to the historical data CSV for the `FitnessEvaluator`.
-        - `strategy_config_template (dict)`: A template dictionary for `FitnessEvaluator.evaluate_strategy()`, which must include `symbol` and can include other base parameters for the strategy.
-        - `population_size (int)`: The number of strategies in each generation.
-        - `num_generations (int)`: The number of generations the evolution process will run for.
-    - **`run_evolution() -> Optional[Tuple[Optional[str], Optional[Dict[str, Any]]]]`**:
-      - This is the main method that drives the evolutionary process.
-      - **Workflow:**
-        1.  **Initialization**: Creates an initial population of strategy code strings using `evolutionary_engine.initialize_population()`.
-        2.  **Generational Loop**: Iterates for the configured `num_generations`. In each generation:
-            a.  **Evaluation**: Each strategy code in the current population is evaluated by calling `fitness_evaluator.evaluate_strategy()`, passing the strategy code, `historical_data_path`, and `strategy_config_template`.
-            b.  **Tracking & Logging**: The best strategy within the current generation (based on the `primary_fitness_metric` from `EvolutionaryEngine`) and its fitness metrics are logged. The overall best strategy found across all generations so far is also tracked.
-            c.  **Evolution**: If not the last generation, the population is evolved by calling `evolutionary_engine.evolve_population()`, which uses the fitness scores from the evaluation step to select parents, perform crossover, and apply mutation, producing the next generation of strategy codes.
-        3.  **Return Value**: After all generations are complete, it returns a tuple containing the code string of the best strategy found overall and its corresponding fitness metrics dictionary. If no strategy is found or an error occurs, it may return `(None, None)`.
+-   **`StrategyGenerator`**: Orchestrates the entire strategy evolution process. It coordinates the `EvolutionaryEngine` for population management and genetic operations, the `FitnessEvaluator` for assessing strategy performance, and the `LLMInterface` for optional refinement steps. It manages the main generational loop and tracks the overall best strategy.
 
-## Workflow Overview:
-The `StrategyGenerator` orchestrates the evolutionary cycle as follows:
+### `evolutionary_engine.py`
+-   **`EvolutionaryEngine`**: Implements the core genetic algorithm. It handles:
+    -   Initialization of the strategy population using the `DEFAULT_STRATEGY_TEMPLATE`.
+    -   Selection of parent strategies (e.g., tournament selection).
+    -   Crossover of parent strategies (currently parameter swapping).
+    -   Mutation of offspring strategies (currently random parameter changes).
+-   **`DEFAULT_STRATEGY_TEMPLATE`**: A string variable within this file that defines the base Python code structure for strategies being evolved. It includes identifiable parameters that the engine modifies.
 
-1.  **Initial Population**: `StrategyGenerator` directs the `EvolutionaryEngine` to create an initial population of diverse strategy code strings. These strategies are typically variations of a base template with different parameter values. (The `MockLLMInterface` is available but not currently used by `EvolutionaryEngine` or `StrategyGenerator` for this step).
-2.  **Fitness Evaluation (Loop)**: For each strategy in the current population, `StrategyGenerator` instructs the `FitnessEvaluator` to:
-    a.  Load the strategy code.
-    b.  Run a backtest using the historical data specified in `StrategyGenerator`'s configuration.
-    c.  Calculate and return a dictionary of performance metrics.
-3.  **Evolutionary Operations (Loop)**: Based on the fitness metrics received from `FitnessEvaluator`, `StrategyGenerator` tasks the `EvolutionaryEngine` to:
-    a.  Select parent strategies (e.g., using tournament selection based on a primary metric like Sharpe ratio).
-    b.  Generate offspring strategies through crossover and mutation operators. This forms the next generation's population.
-4.  **Iteration**: Steps 2 and 3 are repeated for a configured number of generations. `StrategyGenerator` keeps track of the best-performing strategy found across all generations.
-5.  **Result**: The `StrategyGenerator` outputs the best strategy code and its performance metrics found during the entire evolutionary process.
+### `fitness_evaluator.py`
+-   **`FitnessEvaluator`**: Responsible for evaluating the fitness of individual strategy code strings.
+    -   It dynamically executes the strategy code.
+    -   It uses the main `Backtester` engine (`src/backtester/engine.py`) to run the strategy against historical data.
+    -   It calculates performance metrics using `src/backtester/metrics.py` to serve as fitness scores.
 
----
-This structure provides a foundation for building a sophisticated AI-powered strategy discovery system. The `MockLLMInterface` remains a placeholder for future integration where an LLM could assist in generating initial strategies, or in more complex mutation/crossover operations within the `EvolutionaryEngine`.
+### `llm_interface.py`
+-   **`MockLLMInterface`**: A mock implementation of the `LLMInterface`.
+    -   It simulates interactions with a Large Language Model for tasks like refining strategy code based on feedback.
+    -   Currently, its methods (`generate_strategy_code`, `refine_strategy_code`, `combine_strategy_codes`) return predefined or slightly modified versions of the input code/prompts, without actual LLM calls. This allows testing the integration points for future real LLM use.
+
+This module aims to provide a flexible and extensible framework for experimenting with AI techniques in algorithmic trading strategy development.Okay, `src/strategy_lab/README.md` has been updated.
+
+Next, I will update `src/broker_api/README.md`.
+I'll first check if it exists and read its content.

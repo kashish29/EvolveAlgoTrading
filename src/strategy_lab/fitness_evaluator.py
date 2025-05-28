@@ -10,7 +10,8 @@ from algo_trading_framework.src.backtester.engine import BacktesterEngine
 from algo_trading_framework.src.backtester.metrics import calculate_all_metrics
 from algo_trading_framework.src.core.models import Candle
 from algo_trading_framework.src.core.enums import Timeframe
-from algo_trading_framework.src.strategies.base_strategy import BaseStrategy
+from src.strategies.base_strategy import BaseStrategy
+import src # Import the src package to pass to exec
 
 class FitnessEvaluator:
     """
@@ -72,9 +73,17 @@ class FitnessEvaluator:
         strategy_class = None
         
         # 1. Dynamic Strategy Loading
+        # Create a scope for exec, and pass BaseStrategy and src for imports within the template.
+        exec_globals = {
+            'BaseStrategy': BaseStrategy,
+            'src': src,  # Make the 'src' package available for imports like 'from src.core...'
+            '__builtins__': __builtins__
+        }
+        strategy_namespace = {} # Local scope for the executed code
+
         try:
-            exec(strategy_code_string, strategy_namespace)
-            strategy_class = self._find_strategy_class(strategy_namespace)
+            exec(strategy_code_string, exec_globals, strategy_namespace)
+            strategy_class = self._find_strategy_class(strategy_namespace) 
             if strategy_class is None:
                 error_metrics_with_details["error"] = "No 'EvolvedStrategy' or BaseStrategy subclass found in strategy code."
                 return error_metrics_with_details
@@ -82,90 +91,69 @@ class FitnessEvaluator:
             error_metrics_with_details["error"] = f"Error executing strategy code: {str(e)}"
             return error_metrics_with_details
 
-        # 2. Data Loading
-        hdm = HistoricalDataManager()
+        # 2. Data Loading and Preparation
         candles_list: List[Candle] = []
-        symbol = strategy_config.get("symbol", "UNKNOWN_SYMBOL") # Get symbol from config
+        symbol = strategy_config.get("symbol", "UNKNOWN_SYMBOL") 
 
         try:
             df = pd.read_csv(historical_data_path)
             if df.empty:
                 error_metrics_with_details["error"] = "Historical data CSV is empty."
                 return error_metrics_with_details
-
-            # Ensure required columns exist
             required_cols = {'timestamp', 'open', 'high', 'low', 'close', 'volume'}
             if not required_cols.issubset(df.columns):
-                error_metrics_with_details["error"] = f"Historical data CSV missing one or more required columns: {required_cols - set(df.columns)}"
+                error_metrics_with_details["error"] = f"Historical data CSV missing required columns: {required_cols - set(df.columns)}"
                 return error_metrics_with_details
-            
-            # Convert timestamp to datetime objects
             df['timestamp'] = pd.to_datetime(df['timestamp'])
-
             for _, row in df.iterrows():
                 candles_list.append(Candle(
-                    timestamp=row['timestamp'],
-                    open=row['open'],
-                    high=row['high'],
-                    low=row['low'],
-                    close=row['close'],
-                    volume=row['volume'],
-                    symbol=symbol # Add symbol to candle
+                    timestamp=row['timestamp'], open=row['open'], high=row['high'],
+                    low=row['low'], close=row['close'], volume=row['volume'], symbol=symbol
                 ))
-            
-            if not candles_list:
+            if not candles_list: # Should be caught by df.empty, but as a safeguard
                 error_metrics_with_details["error"] = "No candles processed from historical data."
                 return error_metrics_with_details
-                
-            data_feeds = {symbol: candles_list}
-            hdm.load_data(data_feeds)
-            
             start_date = candles_list[0].timestamp
             end_date = candles_list[-1].timestamp
-
         except FileNotFoundError:
             error_metrics_with_details["error"] = f"Historical data file not found: {historical_data_path}"
             return error_metrics_with_details
-        except pd.errors.EmptyDataError:
-            error_metrics_with_details["error"] = f"Historical data file is empty or malformed: {historical_data_path}"
-            return error_metrics_with_details
+        except pd.errors.EmptyDataError: # For CSVs that exist but are totally empty or just headers
+             error_metrics_with_details["error"] = f"Historical data file is empty or malformed (pandas EmptyDataError): {historical_data_path}"
+             return error_metrics_with_details
         except Exception as e:
             error_metrics_with_details["error"] = f"Error loading or processing historical data: {str(e)}"
             return error_metrics_with_details
-
+            
         # 3. Backtesting Setup
         try:
             initial_cash = self.config.get("initial_cash", 100000)
-            commission_rate = self.config.get("commission_rate", 0.0007) # 0.07%
+            commission_rate = self.config.get("commission_rate", 0.0007)
             
+            # MockFyersClient should be initialized with the actual candle data for the symbol.
+            data_feeds_for_broker = {symbol: candles_list}
             broker = MockFyersClient(
-                historical_data_manager=hdm,
+                historical_data=data_feeds_for_broker, # Pass loaded candles
                 initial_cash=initial_cash,
                 commission_rate=commission_rate,
-                symbols_allowed=[symbol] # Ensure broker knows about the symbol
+                symbols_allowed=[symbol]
             )
+            
+            # HistoricalDataManager is initialized with the broker.
+            # It will use broker.get_historical_data to fetch (which for MockFyersClient means using the data_feeds_for_broker).
+            hdm = HistoricalDataManager(broker_client=broker)
             
             strategy_id = f"evolved_strat_{uuid.uuid4()}"
-            # Ensure strategy_config passed to strategy includes the symbol if not already there
-            if "symbol" not in strategy_config: # Should already be there from earlier step
-                strategy_config["symbol"] = symbol
+            if "symbol" not in strategy_config: strategy_config["symbol"] = symbol
 
-            strategy_instance = strategy_class(
-                strategy_id=strategy_id,
-                broker=broker,
-                config=strategy_config
-            )
+            strategy_instance = strategy_class(strategy_id=strategy_id, broker=broker, config=strategy_config)
             
-            timeframe_value = strategy_config.get("timeframe", Timeframe.DAY_1.value) # Default to daily
+            timeframe_value = strategy_config.get("timeframe", Timeframe.DAY_1.value)
             
             engine = BacktesterEngine(
-                strategy=strategy_instance,
-                broker=broker,
-                historical_data_manager=hdm,
-                symbols_to_trade=[symbol],
-                timeframe=timeframe_value,
-                start_date=start_date,
-                end_date=end_date
+                strategy=strategy_instance, broker=broker, historical_data_manager=hdm,
+                symbols_to_trade=[symbol], timeframe=timeframe_value,
+                start_date=start_date, end_date=end_date
             )
         except Exception as e:
             error_metrics_with_details["error"] = f"Error setting up backtester: {str(e)}"
