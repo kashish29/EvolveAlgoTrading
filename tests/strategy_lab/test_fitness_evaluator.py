@@ -125,7 +125,7 @@ class TestFitnessEvaluator(unittest.TestCase):
             self.complex_strategy_code, self.dummy_data_path, self.strategy_config 
         )
         
-        # Assertions for PerformanceReporter usage
+
         mock_performance_reporter_class.assert_called_once()
         call_args = mock_performance_reporter_class.call_args
         

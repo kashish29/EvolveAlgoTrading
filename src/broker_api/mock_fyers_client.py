@@ -23,6 +23,7 @@ class MockFyersClient(BaseBrokerClient):
         self.trade_log: list = []     # Stores Trade objects or dicts representing trades
         self.order_id_counter: int = 0
         self.trade_id_counter: int = 0
+        self.simulated_order_updates_log: List['Order'] = []
         
         # historical_data can be an instance of HistoricalDataManager or a dict
         self.historical_data = historical_data if historical_data is not None else {}
@@ -108,6 +109,9 @@ class MockFyersClient(BaseBrokerClient):
             setattr(order, 'status', "REJECTED")
             setattr(order, 'reject_reason', "Invalid order parameters")
             self.all_orders.append(order) # Log rejected order
+            # For non-market orders, REJECTED is a terminal state for the order lifecycle from client's perspective
+            if order_type_processed != "MARKET":
+                self.simulated_order_updates_log.append(order)
             return order_id, "REJECTED"
 
         # Use processed string versions for logic
@@ -204,6 +208,7 @@ class MockFyersClient(BaseBrokerClient):
                 setattr(order, 'status', "REJECTED")
                 setattr(order, 'reject_reason', f"Missing {required_price_attr}")
                 self.all_orders.append(order)
+                self.simulated_order_updates_log.append(order) # Add to the new log
                 return order_id, "REJECTED"
 
             setattr(order, 'status', "ACCEPTED") # Or "PENDING"
@@ -219,6 +224,7 @@ class MockFyersClient(BaseBrokerClient):
             setattr(order, 'status', "REJECTED")
             setattr(order, 'reject_reason', f"Unknown order type: {order_type_processed}")
             self.all_orders.append(order)
+            self.simulated_order_updates_log.append(order) # Add to the new log
             return order_id, "REJECTED"
 
     def _process_pending_orders(self): # Signature changed, no current_bar argument
@@ -328,6 +334,7 @@ class MockFyersClient(BaseBrokerClient):
                 setattr(order, 'filled_timestamp', bar_timestamp)
                 setattr(order, 'commission', commission)
                 
+                self.simulated_order_updates_log.append(order) # Add to the new log
                 del self.open_orders[order_id]
                 self.logger.info(f"{order_type_processed} order {order_id} for {order_quantity} {order_symbol} @ {actual_fill_price:.2f} COMPLETED. Commission: {commission:.2f}")
 
@@ -388,6 +395,7 @@ class MockFyersClient(BaseBrokerClient):
         setattr(order, 'status', 'CANCELLED')
         setattr(order, 'cancelled_timestamp', self.current_time)
         
+        self.simulated_order_updates_log.append(order) # Add to the new log
         del self.open_orders[order_id]
         
         self.logger.info(f"Order {order_id} cancelled.")
@@ -526,3 +534,16 @@ class MockFyersClient(BaseBrokerClient):
             # It expects data to be specifically pre-loaded if it's to be returned.
 
         return data_to_return
+
+    def get_simulated_order_updates(self) -> List['Order']:
+        """
+        Retrieves simulated order updates that occurred based on recent market data 
+        (e.g., fills, cancellations, rejections for pending orders) and clears the internal log.
+        
+        Market orders are processed synchronously and their "COMPLETED" or "REJECTED" status
+        is returned directly by place_order; they won't appear in this list unless rejected
+        for reasons other than being a market order (which is rare for this mock).
+        """
+        updates_to_dispatch = list(self.simulated_order_updates_log) # Make a copy
+        self.simulated_order_updates_log.clear() # Clear the log
+        return updates_to_dispatch

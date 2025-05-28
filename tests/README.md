@@ -51,8 +51,9 @@ This command will find all files matching the pattern `test_*.py` within the `te
 *   **`tests/utils/`**:
     *   **Scope**: This directory is for tests of utility functions and classes found in `src/utils/`, such as `config_loader.py`, `datetime_utils.py`, and `logger.py`. Tests would ensure that configuration is loaded correctly, datetime manipulations are accurate, and logging is set up and functions as intended. (Currently contains `__init__.py`).
 
-*   **`tests/live_trader/`**:
-    *   **Scope**: Placeholder for tests of the `src/live_trader/` module components once they are developed (e.g., `EventHandler`, `SignalProcessor`, `ExecutionHandler`). (Currently contains `__init__.py`).
+### Live Trader Tests (`tests/live_trader/`)
+
+This suite tests the components responsible for simulating live trading operations, including event handling, signal processing, and execution handling. For more details, see the [Live Trader Tests README](./live_trader/README.md).
 
 *   **`tests/risk_management/`**:
     *   **Scope**: Placeholder for tests of the `src/risk_management/` module components once they are developed (e.g., `RiskMonitor`, risk rule implementations). (Currently contains `__init__.py`).

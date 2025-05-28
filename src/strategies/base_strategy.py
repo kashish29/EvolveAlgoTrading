@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Dict
 
 if TYPE_CHECKING: # pragma: no cover
     from src.broker_api.base_broker_client import BaseBrokerClient # type: ignore
-    from src.core.models import Candle # type: ignore
+    from src.core.models import Candle, Order, Trade # type: ignore
 
 class BaseStrategy(ABC):
     def __init__(self, strategy_id: str, broker: 'BaseBrokerClient', config: dict = None):
@@ -31,6 +31,24 @@ class BaseStrategy(ABC):
         :param current_bars: A dictionary mapping symbol strings to Candle objects 
                              representing the current market data for subscribed symbols.
         """
+        pass
+
+    def on_order_update(self, order_update: 'Order'):
+        """
+        Called when an order update is received from the broker.
+        
+        :param order_update: An Order object representing the updated state of an order.
+        """
+        self.logger.info(f"Order update received: {order_update}")
+        pass
+
+    def on_fill(self, trade_event: 'Trade'):
+        """
+        Called when a trade/fill is received.
+        
+        :param trade_event: A Trade object representing the execution of a trade.
+        """
+        self.logger.info(f"Trade fill received: {trade_event}")
         pass
 
     # Optional helper methods can be added here

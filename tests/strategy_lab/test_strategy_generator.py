@@ -154,7 +154,8 @@ class TestStrategyGenerator(unittest.TestCase):
 
     def test_run_evolution_handles_empty_population(self):
         pop_size = self.config['population_size']
-        self.generator.config['num_generations'] = 2 
+        self.generator.config['num_generations'] = 2
+        self.generator.config['num_llm_refinement_cycles'] = 0 # Prevent LLM refinement call
         self.mock_evolutionary_engine.reset_mock(); self.mock_fitness_evaluator.reset_mock(); self.mock_logger.reset_mock()
         self.mock_evolutionary_engine.initialize_population.return_value = []
         best_code_empty_init, best_fitness_empty_init = self.generator.run_evolution()

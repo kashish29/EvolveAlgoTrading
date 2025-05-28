@@ -160,6 +160,7 @@ class FitnessEvaluator:
             
             engine = BacktesterEngine(
                 strategy=strategy_instance, broker=broker, historical_data_manager=hdm,
+
                 symbols=[symbol], timeframe=timeframe_value, # Corrected: symbols_to_trade -> symbols
                 start_date=start_date, end_date=end_date,
                 generate_analytics_report=False # No need for engine to generate its own report here
