@@ -6,7 +6,7 @@ DEFAULT_STRATEGY_TEMPLATE = """
 import logging
 # BaseStrategy will be injected into the execution scope by FitnessEvaluator
 # from src.strategies.base_strategy import BaseStrategy 
-from src.core.models import Order, OrderType, OrderSide, Candle
+from src.core.models import Order, OrderType, OrderSide, Candle, Position # Added Position for completeness
 from typing import TYPE_CHECKING, Dict, List
 import random
 

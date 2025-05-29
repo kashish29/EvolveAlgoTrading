@@ -1,11 +1,8 @@
 import numpy as np
 import math
 import datetime
-from typing import List, Dict, Any # Using Any for trade_log items for now
-
-# Placeholder for src.core.models.Trade if needed for type hinting,
-# but current implementation assumes trade_log contains dicts.
-# from src.core.models import Trade 
+from typing import List, Dict, Any
+from src.core.models import Trade # Import the Trade class
 
 # --- Equity Curve Based Metrics ---
 
@@ -116,12 +113,12 @@ def calculate_max_drawdown(equity_curve: List[float]) -> float:
 
 # --- Trade Log Based Metrics ---
 
-def calculate_win_rate_avg_win_loss_profit_factor(trade_log: List[Dict[str, Any]]) -> Dict[str, float]:
+def calculate_win_rate_avg_win_loss_profit_factor(trade_log: List[Trade]) -> Dict[str, float]:
     """
     Calculates win rate, average win/loss, and profit factor from a trade log.
-    Assumes each trade dict in trade_log has a 'pnl' key with realized PNL.
+    Assumes each Trade object in trade_log has a 'pnl' attribute with realized PNL.
     """
-    pnls = [t.get('pnl', 0.0) for t in trade_log if t.get('pnl') is not None] # Filter out trades without PNL
+    pnls = [t.pnl for t in trade_log if hasattr(t, 'pnl') and t.pnl is not None] # Filter out trades without PNL
     
     if not pnls: # No trades with PNL information
         return {
@@ -137,18 +134,19 @@ def calculate_win_rate_avg_win_loss_profit_factor(trade_log: List[Dict[str, Any]
     num_losses = len(losses)
     num_trades_with_pnl = num_wins + num_losses
 
-    win_rate = num_wins / num_trades_with_pnl if num_trades_with_pnl > 0 else 0.0
-    
-    avg_win_pnl = np.mean(wins) if num_wins > 0 else 0.0
-    avg_loss_pnl = np.mean(losses) if num_losses > 0 else 0.0 # This will be a negative number or 0
 
-    total_profit = np.sum(wins)
-    total_loss = np.sum(losses) # Sum of negative PNLs, so this is a negative value
+    win_rate = float(num_wins / num_trades_with_pnl) if num_trades_with_pnl > 0 else 0.0
+    
+    avg_win_pnl = float(np.mean(wins)) if num_wins > 0 else 0.0
+    avg_loss_pnl = float(np.mean(losses)) if num_losses > 0 else 0.0 # This will be a negative number or 0
+
+    total_profit = float(np.sum(wins))
+    total_loss = float(np.sum(losses)) # Sum of negative PNLs, so this is a negative value
 
     if total_loss == 0: # Avoid division by zero for profit factor
         profit_factor = float('inf') if total_profit > 0 else 0.0 # Or 1.0 if total_profit is also 0?
     else:
-        profit_factor = abs(total_profit / total_loss) # abs because total_loss is negative
+        profit_factor = float(abs(total_profit / total_loss)) # abs because total_loss is negative
 
     return {
         "win_rate": win_rate,
@@ -165,9 +163,9 @@ def calculate_win_rate_avg_win_loss_profit_factor(trade_log: List[Dict[str, Any]
 # --- Main Metrics Calculation Function ---
 
 def calculate_all_metrics(
-    equity_curve: List[float], 
-    trade_log: List[Dict[str, Any]], 
-    risk_free_rate_annual: float, 
+    equity_curve: List[float],
+    trade_log: List[Trade], # Changed type hint to List[Trade]
+    risk_free_rate_annual: float,
     backtest_duration_days: int,
     trading_days_per_year: int = 252
 ) -> Dict[str, float]:
@@ -204,17 +202,19 @@ if __name__ == '__main__': # pragma: no cover
     # sample_equity_curve = [100.0, 110.0, 105.0, 120.0, 90.0, 95.0, 80.0, 110.0]
 
 
-    # Sample Trade Log (list of dictionaries, each with a 'pnl' field)
-    sample_trade_log: List[Dict[str, Any]] = [
-        {"trade_id": "t1", "pnl": 1500.0},
-        {"trade_id": "t2", "pnl": -500.0},
-        {"trade_id": "t3", "pnl": 2000.0},
-        {"trade_id": "t4", "pnl": -800.0},
-        {"trade_id": "t5", "pnl": 1200.0},
-        {"trade_id": "t6", "pnl": 300.0},
-        {"trade_id": "t7", "pnl": -1000.0},
-        {"trade_id": "t8", "pnl": 0.0}, # Break-even trade
-        {"trade_id": "t9"}, # Trade without PNL
+    # Sample Trade Log (list of Trade objects, each with a 'pnl' field)
+    # For demonstration, we'll create dummy Trade objects.
+    from src.core.enums import OrderSide
+    sample_trade_log: List[Trade] = [
+        Trade(trade_id="t1", order_id="o1", symbol="SYM1", quantity=10, price=100.0, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=1.0, pnl=1500.0),
+        Trade(trade_id="t2", order_id="o2", symbol="SYM1", quantity=10, price=100.0, side=OrderSide.SELL, timestamp=datetime.datetime.now(), commission=1.0, pnl=-500.0),
+        Trade(trade_id="t3", order_id="o3", symbol="SYM2", quantity=5, price=200.0, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0.5, pnl=2000.0),
+        Trade(trade_id="t4", order_id="o4", symbol="SYM2", quantity=5, price=200.0, side=OrderSide.SELL, timestamp=datetime.datetime.now(), commission=0.5, pnl=-800.0),
+        Trade(trade_id="t5", order_id="o5", symbol="SYM3", quantity=15, price=50.0, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0.75, pnl=1200.0),
+        Trade(trade_id="t6", order_id="o6", symbol="SYM3", quantity=15, price=50.0, side=OrderSide.SELL, timestamp=datetime.datetime.now(), commission=0.75, pnl=300.0),
+        Trade(trade_id="t7", order_id="o7", symbol="SYM4", quantity=20, price=25.0, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0.25, pnl=-1000.0),
+        Trade(trade_id="t8", order_id="o8", symbol="SYM4", quantity=20, price=25.0, side=OrderSide.SELL, timestamp=datetime.datetime.now(), commission=0.25, pnl=0.0), # Break-even trade
+        # Trade(trade_id="t9", order_id="o9", symbol="SYM5", quantity=5, price=100.0, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0.1), # Trade without PNL
     ]
     
     risk_free_annual = 0.03 # 3% annual risk-free rate
@@ -237,7 +237,7 @@ if __name__ == '__main__': # pragma: no cover
     # Test with empty/minimal data
     print("\nTesting with minimal data:")
     empty_equity: List[float] = [100000.0]
-    empty_trades: List[Dict[str, Any]] = []
+    empty_trades: List[Trade] = [] # Changed type hint to List[Trade]
     minimal_metrics = calculate_all_metrics(empty_equity, empty_trades, risk_free_annual, 1)
     for key, value in minimal_metrics.items():
         if isinstance(value, float):
@@ -284,17 +284,17 @@ if __name__ == '__main__': # pragma: no cover
     print(f"  Max DD for zero curve {dd_curve_5}: {calculate_max_drawdown(dd_curve_5):.4f}") # 0.0
 
     print("\nTesting Profit Factor with edge cases:")
-    pf_stats_1 = calculate_win_rate_avg_win_loss_profit_factor([{"pnl": 100}, {"pnl": 50}]) # Only wins
+    pf_stats_1 = calculate_win_rate_avg_win_loss_profit_factor([Trade(trade_id="t1", order_id="o1", symbol="SYM1", quantity=1, price=1, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0, pnl=100), Trade(trade_id="t2", order_id="o2", symbol="SYM1", quantity=1, price=1, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0, pnl=50)]) # Only wins
     print(f"  PF only wins: {pf_stats_1['profit_factor']:.4f}") # inf
-    pf_stats_2 = calculate_win_rate_avg_win_loss_profit_factor([{"pnl": -100}, {"pnl": -50}]) # Only losses
+    pf_stats_2 = calculate_win_rate_avg_win_loss_profit_factor([Trade(trade_id="t1", order_id="o1", symbol="SYM1", quantity=1, price=1, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0, pnl=-100), Trade(trade_id="t2", order_id="o2", symbol="SYM1", quantity=1, price=1, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0, pnl=-50)]) # Only losses
     print(f"  PF only losses: {pf_stats_2['profit_factor']:.4f}") # 0.0
-    pf_stats_3 = calculate_win_rate_avg_win_loss_profit_factor([{"pnl": 0}, {"pnl": 0}]) # Only zeros
+    pf_stats_3 = calculate_win_rate_avg_win_loss_profit_factor([Trade(trade_id="t1", order_id="o1", symbol="SYM1", quantity=1, price=1, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0, pnl=0), Trade(trade_id="t2", order_id="o2", symbol="SYM1", quantity=1, price=1, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0, pnl=0)]) # Only zeros
     print(f"  PF only zeros: {pf_stats_3['profit_factor']:.4f}") # 0.0
     pf_stats_4 = calculate_win_rate_avg_win_loss_profit_factor([]) # No trades
     print(f"  PF no trades: {pf_stats_4['profit_factor']:.4f}") # 0.0
-    pf_stats_5 = calculate_win_rate_avg_win_loss_profit_factor([{"pnl": 100}, {"pnl": -0.0001}]) # profit, tiny loss
+    pf_stats_5 = calculate_win_rate_avg_win_loss_profit_factor([Trade(trade_id="t1", order_id="o1", symbol="SYM1", quantity=1, price=1, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0, pnl=100), Trade(trade_id="t2", order_id="o2", symbol="SYM1", quantity=1, price=1, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0, pnl=-0.0001)]) # profit, tiny loss
     print(f"  PF profit, tiny loss: {pf_stats_5['profit_factor']:.4f}") # large
-    pf_stats_6 = calculate_win_rate_avg_win_loss_profit_factor([{"pnl": 0.0001}, {"pnl": -100}]) # tiny profit, loss
+    pf_stats_6 = calculate_win_rate_avg_win_loss_profit_factor([Trade(trade_id="t1", order_id="o1", symbol="SYM1", quantity=1, price=1, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0, pnl=0.0001), Trade(trade_id="t2", order_id="o2", symbol="SYM1", quantity=1, price=1, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0, pnl=-100)]) # tiny profit, loss
     print(f"  PF tiny profit, loss: {pf_stats_6['profit_factor']:.4f}") # small (near 0)
-    pf_stats_7 = calculate_win_rate_avg_win_loss_profit_factor([{'pnl':10},{'pnl':-5},{'pnl':0}])
+    pf_stats_7 = calculate_win_rate_avg_win_loss_profit_factor([Trade(trade_id="t1", order_id="o1", symbol="SYM1", quantity=1, price=1, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0, pnl=10),Trade(trade_id="t2", order_id="o2", symbol="SYM1", quantity=1, price=1, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0, pnl=-5),Trade(trade_id="t3", order_id="o3", symbol="SYM1", quantity=1, price=1, side=OrderSide.BUY, timestamp=datetime.datetime.now(), commission=0, pnl=0)])
     print(f"  PF mixed with zero: {pf_stats_7}")

@@ -63,6 +63,7 @@ class Trade: # From src copy, with minor adaptations
     side: OrderSide # from src copy (was trade_type: TradeType)
     timestamp: datetime # Execution timestamp for this trade
     commission: float = 0.0 # from src copy (was float)
+    pnl: float = 0.0 # Added for realized PnL in backtesting
     tag: Optional[str] = None # Optional tag inherited from order (from src copy)
     # Fields from original Trade not directly in src copy:
     # instrument_type: Optional[InstrumentType] = InstrumentType.EQUITY -> Could be added

@@ -1,3 +1,4 @@
+import random
 from typing import Optional, Dict, List, TYPE_CHECKING, Any
 # The following imports are primarily for the template string, not directly used by MockLLMInterface methods.
 from src.strategies.base_strategy import BaseStrategy
@@ -24,9 +25,9 @@ class EvolvedStrategy(BaseStrategy):
         
         self.symbol = self.config.get("symbol", "DEFAULT_SYMBOL")
         # --- PARAM START ---
-        self.short_window = self.config.get("short_window", 5)
-        self.long_window = self.config.get("long_window", 10)
-        self.quantity = self.config.get("quantity", 1)
+        self.short_window = self.config.get("short_window", {{SHORT_WINDOW}})
+        self.long_window = self.config.get("long_window", {{LONG_WINDOW}})
+        self.quantity = self.config.get("quantity", {{QUANTITY}})
         # --- PARAM END ---
         
         self.prices: List[float] = []
@@ -34,8 +35,8 @@ class EvolvedStrategy(BaseStrategy):
         self.long_ma_values: List[float] = []
         
         self.logger.info(
-            f"EvolvedStrategy '{{self.strategy_id}}' initialized for {{self.symbol}} "
-            f"with short_window={{self.short_window}}, long_window={{self.long_window}}, quantity={{self.quantity}}."
+            "EvolvedStrategy '{}' initialized for {} ".format(self.strategy_id, self.symbol) + \
+            "with short_window={}, long_window={}, quantity={}.".format(self.short_window, self.long_window, self.quantity)
         )
 
     def _calculate_sma(self, data: List[float], window: int) -> float | None:
@@ -47,7 +48,7 @@ class EvolvedStrategy(BaseStrategy):
         current_bar = current_bars.get(self.symbol)
         
         if not current_bar:
-            self.logger.debug(f"No current bar data for symbol {{self.symbol}} at this timestamp.")
+            self.logger.debug("No current bar data for symbol {} at this timestamp.".format(self.symbol))
             return
 
         self.prices.append(current_bar.close)
@@ -60,7 +61,7 @@ class EvolvedStrategy(BaseStrategy):
         if short_ma is not None: self.short_ma_values.append(short_ma)
         if long_ma is not None: self.long_ma_values.append(long_ma)
 
-        self.logger.debug(f"Symbol: {{self.symbol}}, Close: {{current_bar.close}}, ShortMA: {{short_ma}}, LongMA: {{long_ma}}")
+        self.logger.debug("Symbol: {}, Close: {}, ShortMA: {}, LongMA: {}".format(self.symbol, current_bar.close, short_ma, long_ma))
 
         if short_ma is None or long_ma is None:
             self.logger.debug("Not enough data for MA calculation yet.")
@@ -87,22 +88,22 @@ class EvolvedStrategy(BaseStrategy):
                 order = Order(id=None, symbol=self.symbol, quantity=self.quantity, side=OrderSide.BUY, order_type=OrderType.MARKET)
                 try:
                     order_id, status = self.broker.place_order(order)
-                    self.logger.info(f"BUY signal for {{self.symbol}}. Placed MARKET order. ID: {{order_id}}, Status: {{status}}")
+                    self.logger.info("BUY signal for {}. Placed MARKET order. ID: {}, Status: {}".format(self.symbol, order_id, status))
                 except Exception as e:
-                    self.logger.error(f"Error placing BUY order for {{self.symbol}}: {{e}}")
+                    self.logger.error("Error placing BUY order for {}: {}".format(self.symbol, e))
             else:
-                self.logger.debug(f"BUY signal for {{self.symbol}}, but already have position qty: {{current_pos_qty}}. No action.")
+                self.logger.debug("BUY signal for {}, but already have position qty: {}. No action.".format(self.symbol, current_pos_qty))
         elif current_short_ma < current_long_ma and prev_short_ma >= prev_long_ma:
             current_pos_qty = active_position.get('quantity', 0) if active_position else 0
             if current_pos_qty > 0:
                 order = Order(id=None, symbol=self.symbol, quantity=abs(current_pos_qty), side=OrderSide.SELL, order_type=OrderType.MARKET)
                 try:
                     order_id, status = self.broker.place_order(order)
-                    self.logger.info(f"SELL signal for {{self.symbol}}. Placed MARKET order. ID: {{order_id}}, Status: {{status}}")
+                    self.logger.info("SELL signal for {}. Placed MARKET order. ID: {}, Status: {}".format(self.symbol, order_id, status))
                 except Exception as e:
-                    self.logger.error(f"Error placing SELL order for {{self.symbol}}: {{e}}")
+                    self.logger.error("Error placing SELL order for {}: {}".format(self.symbol, e))
             else:
-                self.logger.debug(f"SELL signal for {{self.symbol}}, but no active long position. No action.")
+                self.logger.debug("SELL signal for {}, but no active long position. No action.".format(self.symbol))
 """
 
 class MockLLMInterface:
@@ -135,7 +136,21 @@ class MockLLMInterface:
             str: A mock Python strategy code string.
         """
         print(f"MockLLMInterface: generate_initial_strategy called with prompt: '{prompt[:50]}...'")
-        return EVOLVED_STRATEGY_TEMPLATE
+        
+        short_window = random.randint(5, 20)
+        long_window = random.randint(21, 50)
+        quantity = random.randint(1, 10)
+
+        # Ensure long_window is always greater than short_window
+        if short_window >= long_window:
+            long_window = short_window + random.randint(5, 15)
+
+        # Replace placeholders in the template
+        strategy_code = EVOLVED_STRATEGY_TEMPLATE.replace("{{SHORT_WINDOW}}", str(short_window))
+        strategy_code = strategy_code.replace("{{LONG_WINDOW}}", str(long_window))
+        strategy_code = strategy_code.replace("{{QUANTITY}}", str(quantity))
+
+        return strategy_code
 
     def refine_strategy_code(self, code: str, feedback: str) -> str:
         """

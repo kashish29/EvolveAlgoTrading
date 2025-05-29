@@ -94,10 +94,30 @@ class FitnessEvaluator:
         return None
 
     def _convert_trades_to_dataframe(self, trade_objects: list) -> pd.DataFrame:
+
         if not trade_objects:
             return pd.DataFrame()
 
-        df = pd.DataFrame(trade_objects)
+        # Convert list of Trade objects to a list of dictionaries for DataFrame creation
+        # This ensures compatibility if Trade objects are used directly
+        trade_dicts = []
+        for trade in trade_objects:
+            if isinstance(trade, dict):
+                trade_dicts.append(trade)
+            else: # Assume it's a Trade object
+                trade_dicts.append({
+                    "trade_id": getattr(trade, 'trade_id', None),
+                    "order_id": getattr(trade, 'order_id', None),
+                    "symbol": getattr(trade, 'symbol', None),
+                    "quantity": getattr(trade, 'quantity', 0),
+                    "price": getattr(trade, 'price', 0.0),
+                    "side": getattr(trade, 'side', None),
+                    "timestamp": getattr(trade, 'timestamp', None),
+                    "commission": getattr(trade, 'commission', 0.0),
+                    "pnl": getattr(trade, 'pnl', 0.0)
+                })
+
+        df = pd.DataFrame(trade_dicts)
         
         # Ensure essential columns are present, others can be optional
         # 'pnl' is critical for PerformanceReporter trade metrics
@@ -134,7 +154,15 @@ class FitnessEvaluator:
         
         exec_globals = {
             'BaseStrategy': ActualBaseStrategy, 'src': src, '__builtins__': __builtins__,
-            'List': List, 'Dict': Dict # Explicitly add typing generics
+            'List': List, 'Dict': Dict, # Explicitly add typing generics
+            # Explicitly add core models for strategy code execution
+            'Order': src.core.models.Order,
+            'OrderType': src.core.models.OrderType,
+            'OrderSide': src.core.models.OrderSide,
+            'Candle': src.core.models.Candle,
+            'Position': src.core.models.Position,
+            'Timeframe': src.core.models.Timeframe,
+            'uuid': uuid # uuid is used in the strategy template
         }
         try:
             exec(strategy_code_string, exec_globals, strategy_namespace)
@@ -212,12 +240,17 @@ class FitnessEvaluator:
             return error_metrics_with_details
 
         try:
-            _, portfolio_history = engine.run() # engine.run() returns (equity_curve_raw_values, portfolio_history)
+            # The engine.run() now returns (equity_curve_raw_values, portfolio_history)
+            # We need the portfolio_history from the broker, which is updated by set_current_time
+            engine.run()
             self.logger.info("Backtester engine run completed.")
+            
             trade_log = broker.get_trade_history()
             trade_df = self._convert_trades_to_dataframe(trade_log)
             self.logger.info(f"Trades converted to DataFrame. Number of trades: {len(trade_df)}")
 
+            portfolio_history = broker.portfolio_history # Get history from broker
+            
             if trade_df.empty:
                 self.logger.warning("Trade DataFrame is empty. Cannot generate analytics metrics.")
                 error_metrics_with_details["error"] = "No trades recorded. Cannot generate analytics metrics."

@@ -24,6 +24,7 @@ class ExampleMovingAverageCrossStrategy(BaseStrategy):
             f"ExampleMovingAverageCrossStrategy '{self.strategy_id}' initialized for {self.symbol} "
             f"with short_window={self.short_window}, long_window={self.long_window}, quantity={self.quantity}."
         )
+        print(f"Strategy '{self.strategy_id}' initialized for {self.symbol}")
 
     def _calculate_sma(self, data: List[float], window: int) -> float | None:
         if len(data) < window:
@@ -47,11 +48,13 @@ class ExampleMovingAverageCrossStrategy(BaseStrategy):
         if short_ma is not None: self.short_ma_values.append(short_ma)
         if long_ma is not None: self.long_ma_values.append(long_ma)
 
-        self.logger.debug(f"Symbol: {self.symbol}, Close: {current_bar.close}, ShortMA: {short_ma}, LongMA: {long_ma}")
-
         if short_ma is None or long_ma is None:
             self.logger.debug("Not enough data for MA calculation yet.")
+            print(f"[{current_bar.timestamp}] {self.symbol} - Close: {current_bar.close}, Not enough data for MA calculation yet.")
             return
+
+        self.logger.debug(f"Symbol: {self.symbol}, Close: {current_bar.close}, ShortMA: {short_ma:.2f}, LongMA: {long_ma:.2f}")
+        print(f"[{current_bar.timestamp}] {self.symbol} - Close: {current_bar.close}, Short MA({self.short_window}): {short_ma:.2f}, Long MA({self.long_window}): {long_ma:.2f}")
 
         # --- Broker Interaction ---
         # MockFyersClient.get_positions() returns a list of position dictionaries
@@ -75,6 +78,7 @@ class ExampleMovingAverageCrossStrategy(BaseStrategy):
 
         # Buy Signal: short MA crosses above long MA
         if current_short_ma > current_long_ma and prev_short_ma <= prev_long_ma:
+            print(f"[{current_bar.timestamp}] BUY Crossover detected: Short MA ({current_short_ma:.2f}) > Long MA ({current_long_ma:.2f})")
             current_pos_qty = active_position.get('quantity', 0) if active_position else 0
             if current_pos_qty == 0: # Only buy if not already holding a position
                 order = Order(
@@ -84,16 +88,21 @@ class ExampleMovingAverageCrossStrategy(BaseStrategy):
                     side=OrderSide.BUY,
                     order_type=OrderType.MARKET
                 )
+                print(f"[{current_bar.timestamp}] Placing BUY MARKET order: Symbol={order.symbol}, Qty={order.quantity}")
                 try:
                     order_id, status = self.broker.place_order(order)
                     self.logger.info(f"BUY signal for {self.symbol}. Placed MARKET order for {self.quantity} shares. Order ID: {order_id}, Status: {status}")
+                    print(f"[{current_bar.timestamp}] BUY Order placed. ID: {order_id}, Status: {status}")
                 except Exception as e:
                     self.logger.error(f"Error placing BUY order for {self.symbol}: {e}")
+                    print(f"[{current_bar.timestamp}] Error placing BUY order: {e}")
             else:
                 self.logger.debug(f"BUY signal for {self.symbol}, but already have position qty: {current_pos_qty}. No action.")
+                print(f"[{current_bar.timestamp}] BUY signal, but already in position. Qty: {current_pos_qty}")
 
         # Sell Signal: Short MA crosses below Long MA
         elif current_short_ma < current_long_ma and prev_short_ma >= prev_long_ma:
+            print(f"[{current_bar.timestamp}] SELL Crossover detected: Short MA ({current_short_ma:.2f}) < Long MA ({current_long_ma:.2f})")
             current_pos_qty = active_position.get('quantity', 0) if active_position else 0
             if current_pos_qty > 0: # Only sell if holding a long position
                 order = Order(
@@ -103,10 +112,14 @@ class ExampleMovingAverageCrossStrategy(BaseStrategy):
                     side=OrderSide.SELL,
                     order_type=OrderType.MARKET
                 )
+                print(f"[{current_bar.timestamp}] Placing SELL MARKET order: Symbol={order.symbol}, Qty={order.quantity}")
                 try:
                     order_id, status = self.broker.place_order(order)
                     self.logger.info(f"SELL signal for {self.symbol}. Placed MARKET order for {abs(current_pos_qty)} shares. Order ID: {order_id}, Status: {status}")
+                    print(f"[{current_bar.timestamp}] SELL Order placed. ID: {order_id}, Status: {status}")
                 except Exception as e:
                     self.logger.error(f"Error placing SELL order for {self.symbol}: {e}")
+                    print(f"[{current_bar.timestamp}] Error placing SELL order: {e}")
             else:
                 self.logger.debug(f"SELL signal for {self.symbol}, but no active long position (qty: {current_pos_qty}). No action.")
+                print(f"[{current_bar.timestamp}] SELL signal, but no active long position. Qty: {current_pos_qty}")

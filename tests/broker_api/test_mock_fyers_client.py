@@ -84,8 +84,8 @@ class TestMockFyersClient(unittest.TestCase):
         # Check trade log
         trade_log = self.broker.get_trade_history() # List of dicts
         self.assertEqual(len(trade_log), 1)
-        self.assertEqual(trade_log[0].get('order_id'), order_id)
-        self.assertAlmostEqual(trade_log[0].get('price'), executed_price)
+        self.assertEqual(trade_log[0].order_id, order_id)
+        self.assertAlmostEqual(trade_log[0].price, executed_price)
 
 
     def test_place_limit_buy_order_pending(self):
@@ -227,7 +227,7 @@ class TestMockFyersClient(unittest.TestCase):
         # Check trade history (only market order should have a trade)
         trade_hist = self.broker.get_trade_history() # list of trade dicts
         self.assertEqual(len(trade_hist), 1)
-        self.assertEqual(trade_hist[0].get('order_id'), mkt_order_id)
+        self.assertEqual(trade_hist[0].order_id, mkt_order_id)
         
         trades_for_limit_order = self.broker.get_trade_history(order_id=limit_order_id)
         self.assertEqual(len(trades_for_limit_order), 0)

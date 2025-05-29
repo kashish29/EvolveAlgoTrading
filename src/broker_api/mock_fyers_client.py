@@ -12,8 +12,9 @@ from typing import Union, Dict, Any, Optional, List # Ensure List is here
 class MockFyersClient(BaseBrokerClient):
     def __init__(self, 
                  historical_data: Union[Dict, Any] = None, # Can be HDM instance or dict
-                 initial_cash: float = 100000.0, 
-                 commission_rate: float = 0.0003):
+                 initial_cash: float = 100000.0,
+                 commission_rate: float = 0.0002, # 0.02%
+                 slippage_percent: float = 0.0001): # 0.01%
         self.current_time: Optional[datetime] = None
         self.initial_cash = initial_cash
         self.cash: float = initial_cash
@@ -24,21 +25,23 @@ class MockFyersClient(BaseBrokerClient):
         self.order_id_counter: int = 0
         self.trade_id_counter: int = 0
         self.simulated_order_updates_log: List['Order'] = []
+        self.portfolio_history: List[Dict[str, Any]] = [] # To store snapshots of portfolio value over time
         
         # historical_data can be an instance of HistoricalDataManager or a dict
         self.historical_data = historical_data if historical_data is not None else {}
         
         self.current_bars: dict = {} # Stores symbol: Candle for the current bar
         self.commission_rate: float = commission_rate
-        # Simple slippage model: price +/- up to 0.05%
-        self.slippage_model = lambda price: price * (1 + random.uniform(-0.0005, 0.0005))
+        self.slippage_percent: float = slippage_percent
+        # Simple slippage model: price * (1 + slippage_percent) for buy, price * (1 - slippage_percent) for sell
+        self.slippage_model = lambda price, side: price * (1 + self.slippage_percent) if side == "BUY" else price * (1 - self.slippage_percent)
         
         self.logger = logging.getLogger(self.__class__.__name__) # Use class name for logger
         # Basic config for logging, consider moving to a global config if app expands
         # or if not already configured by a higher-level module (like main.py)
         if not self.logger.handlers:
             logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        self.logger.info(f"MockFyersClient initialized with initial_cash: {initial_cash}, commission_rate: {commission_rate}.")
+        self.logger.info(f"MockFyersClient initialized with initial_cash: {initial_cash}, commission_rate: {commission_rate}, slippage_percent: {slippage_percent}.")
 
     def connect(self):
         print("MockFyersClient connected.")
@@ -151,22 +154,24 @@ class MockFyersClient(BaseBrokerClient):
                         f"Using default base_price: {base_price}."
                     )
             
-            fill_price = self.slippage_model(base_price)
+            fill_price = self.slippage_model(base_price, order_side_processed) # Pass side to slippage model
             trade_value = fill_price * order_quantity
             commission = trade_value * self.commission_rate
 
+
             # Increment Trade ID & Create Trade Object
             self.trade_id_counter += 1
-            trade = {
-                "trade_id": f"mock_trade_{self.trade_id_counter}",
-                "order_id": order_id,
-                "symbol": order_symbol,
-                "quantity": order_quantity,
-                "price": fill_price,
-                "side": order_side_processed, # Use processed string value
-                "timestamp": self.current_time, # Assumes self.current_time is set
-                "commission": commission
-            }
+            trade = Trade(
+                trade_id=f"mock_trade_{self.trade_id_counter}",
+                order_id=order_id,
+                symbol=str(order_symbol), # Ensure it's a string
+                quantity=order_quantity,
+                price=fill_price,
+                side=order.side, # Directly use order.side which is OrderSide
+                timestamp=self.current_time if self.current_time is not None else datetime.now(), # Ensure datetime
+                commission=commission,
+                pnl=0.0 # Initialize pnl for market orders
+            )
             self.trade_log.append(trade)
 
             # Update Cash
@@ -181,36 +186,53 @@ class MockFyersClient(BaseBrokerClient):
                     "symbol": order_symbol, 
                     "quantity": 0, 
                     "average_price": 0.0,
-                    "pnl": 0.0, # PnL calculation would be more complex
-                    "last_price": fill_price 
+                    "unrealized_pnl": 0.0, # Track unrealized PnL for open positions
+                    "last_price": fill_price
                 }
             
             current_pos = self.positions[order_symbol]
+            realized_pnl = 0.0 # Initialize realized PnL for this trade
+
             if order_side_processed == "BUY":
+                if current_pos['quantity'] < 0: # Closing a short position
+                    quantity_to_cover = min(order_quantity, abs(current_pos['quantity']))
+                    realized_pnl += (current_pos['average_price'] - fill_price) * quantity_to_cover
+                    self.logger.debug(f"Realized PnL (covering short): {realized_pnl:.2f}")
+                
                 new_total_value = (current_pos['average_price'] * current_pos['quantity']) + (fill_price * order_quantity)
                 current_pos['quantity'] += order_quantity
                 current_pos['average_price'] = new_total_value / current_pos['quantity'] if current_pos['quantity'] != 0 else fill_price
+            
             elif order_side_processed == "SELL":
-                # Simple assumption: selling reduces existing long or initiates/increases short.
-                # P&L on sell is realized if closing a long. Average price for shorts is more complex.
-                # For now, just adjust quantity. If quantity becomes 0, avg_price is reset.
+                if current_pos['quantity'] > 0: # Closing a long position
+                    quantity_to_close = min(order_quantity, current_pos['quantity'])
+                    realized_pnl += (fill_price - current_pos['average_price']) * quantity_to_close
+                    self.logger.debug(f"Realized PnL (closing long): {realized_pnl:.2f}")
+                
+                new_total_value = (current_pos['average_price'] * current_pos['quantity']) + (fill_price * -order_quantity) # Selling reduces value
                 current_pos['quantity'] -= order_quantity
-                if current_pos['quantity'] == 0:
-                    current_pos['average_price'] = 0.0
-                # If current_pos['quantity'] < 0, it's a short position. 
-                # Avg price of shorts needs careful handling (e.g. separate tracking or weighted average)
-                # For now, if it goes short, average_price might not be meaningful in the same way as for longs.
-
+                current_pos['average_price'] = new_total_value / current_pos['quantity'] if current_pos['quantity'] != 0 else fill_price
+            
             current_pos['last_price'] = fill_price
+            # Update unrealized PnL (simple calculation based on last price)
+            if current_pos['quantity'] != 0:
+                current_pos['unrealized_pnl'] = (current_pos['last_price'] - current_pos['average_price']) * current_pos['quantity']
+            else:
+                current_pos['unrealized_pnl'] = 0.0
+
+
+            # Add realized PnL to the trade object
+            setattr(trade, 'pnl', realized_pnl)
 
             # Update Order Status
             setattr(order, 'status', "COMPLETED")
             setattr(order, 'filled_timestamp', self.current_time)
             setattr(order, 'executed_price', fill_price)
             setattr(order, 'commission', commission) # Store commission on order too
+            setattr(order, 'pnl', realized_pnl) # Store realized PnL on the order object
 
             self.all_orders.append(order)
-            self.logger.info(f"Market order {order_id} for {order_quantity} {order_symbol} @ {fill_price:.2f} COMPLETED.")
+            self.logger.info(f"Market order {order_id} for {order_quantity} {order_symbol} @ {fill_price:.2f} COMPLETED. Realized PnL: {realized_pnl:.2f}")
             return order_id, "COMPLETED"
         
         elif order_type_processed in ["LIMIT", "STOP"]: # Use processed string
@@ -289,14 +311,14 @@ class MockFyersClient(BaseBrokerClient):
                 trigger_price = getattr(order, 'trigger_price') 
                 if order_side_processed == "BUY" and bar_high >= trigger_price:
                     # Stop Buy triggered, execute as market
-                    base_fill_price = max(bar_open, trigger_price) 
-                    actual_fill_price = self.slippage_model(base_fill_price)
+                    base_fill_price = max(bar_open, trigger_price)
+                    actual_fill_price = self.slippage_model(base_fill_price, order_side_processed) # Pass side
                     executed = True
                     self.logger.info(f"STOP BUY order {order_id} for {order_symbol} triggered at {trigger_price:.2f} (bar high: {bar_high:.2f}). Base fill: {base_fill_price:.2f}, Slippage fill: {actual_fill_price:.2f}")
                 elif order_side_processed == "SELL" and bar_low <= trigger_price:
                     # Stop Sell triggered, execute as market
-                    base_fill_price = min(bar_open, trigger_price) 
-                    actual_fill_price = self.slippage_model(base_fill_price)
+                    base_fill_price = min(bar_open, trigger_price)
+                    actual_fill_price = self.slippage_model(base_fill_price, order_side_processed) # Pass side
                     executed = True
                     self.logger.info(f"STOP SELL order {order_id} for {order_symbol} triggered at {trigger_price:.2f} (bar low: {bar_low:.2f}). Base fill: {base_fill_price:.2f}, Slippage fill: {actual_fill_price:.2f}")
 
@@ -304,18 +326,20 @@ class MockFyersClient(BaseBrokerClient):
                 trade_value = actual_fill_price * order_quantity
                 commission = trade_value * self.commission_rate
 
+
                 # Increment Trade ID & Create Trade Object
                 self.trade_id_counter += 1
-                trade = {
-                    "trade_id": f"mock_trade_{self.trade_id_counter}",
-                    "order_id": order_id,
-                    "symbol": order_symbol,
-                    "quantity": order_quantity,
-                    "price": actual_fill_price,
-                "side": order_side_processed, # Use processed string value
-                    "timestamp": bar_timestamp,
-                    "commission": commission
-                }
+                trade = Trade(
+                    trade_id=f"mock_trade_{self.trade_id_counter}",
+                    order_id=order_id,
+                    symbol=str(order_symbol), # Ensure it's a string
+                    quantity=order_quantity,
+                    price=actual_fill_price,
+                    side=order.side, # Directly use order.side which is OrderSide
+                    timestamp=bar_timestamp, # bar_timestamp is already datetime
+                    commission=commission,
+                    pnl=0.0 # Initialize pnl for pending orders
+                )
                 self.trade_log.append(trade)
 
                 # Update Cash
@@ -324,31 +348,54 @@ class MockFyersClient(BaseBrokerClient):
                 elif order_side_processed == "SELL":
                     self.cash += (trade_value - commission)
 
+
                 # Update Positions (reusing logic similar to MARKET orders)
                 if order_symbol not in self.positions:
-                    self.positions[order_symbol] = {"symbol": order_symbol, "quantity": 0, "average_price": 0.0, "pnl": 0.0, "last_price": actual_fill_price}
+                    self.positions[order_symbol] = {"symbol": order_symbol, "quantity": 0, "average_price": 0.0, "unrealized_pnl": 0.0, "last_price": actual_fill_price}
                 
                 current_pos = self.positions[order_symbol]
+                realized_pnl = 0.0 # Initialize realized PnL for this trade
+
                 if order_side_processed == "BUY":
+                    if current_pos['quantity'] < 0: # Closing a short position
+                        quantity_to_cover = min(order_quantity, abs(current_pos['quantity']))
+                        realized_pnl += (current_pos['average_price'] - actual_fill_price) * quantity_to_cover
+                        self.logger.debug(f"Realized PnL (covering short): {realized_pnl:.2f}")
+                    
                     new_total_value = (current_pos['average_price'] * current_pos['quantity']) + (actual_fill_price * order_quantity)
                     current_pos['quantity'] += order_quantity
                     current_pos['average_price'] = new_total_value / current_pos['quantity'] if current_pos['quantity'] != 0 else actual_fill_price
+                
                 elif order_side_processed == "SELL":
+                    if current_pos['quantity'] > 0: # Closing a long position
+                        quantity_to_close = min(order_quantity, current_pos['quantity'])
+                        realized_pnl += (actual_fill_price - current_pos['average_price']) * quantity_to_close
+                        self.logger.debug(f"Realized PnL (closing long): {realized_pnl:.2f}")
+                    
+                    new_total_value = (current_pos['average_price'] * current_pos['quantity']) + (actual_fill_price * -order_quantity) # Selling reduces value
                     current_pos['quantity'] -= order_quantity
-                    if current_pos['quantity'] == 0:
-                        current_pos['average_price'] = 0.0
-                    # Further P&L/short position avg price logic can be added here if needed
+                    current_pos['average_price'] = new_total_value / current_pos['quantity'] if current_pos['quantity'] != 0 else actual_fill_price
+                
                 current_pos['last_price'] = actual_fill_price
+                # Update unrealized PnL
+                if current_pos['quantity'] != 0:
+                    current_pos['unrealized_pnl'] = (current_pos['last_price'] - current_pos['average_price']) * current_pos['quantity']
+                else:
+                    current_pos['unrealized_pnl'] = 0.0
+
+                # Add realized PnL to the trade object
+                setattr(trade, 'pnl', realized_pnl)
 
                 # Update Order Status
                 setattr(order, 'status', "COMPLETED")
                 setattr(order, 'executed_price', actual_fill_price)
                 setattr(order, 'filled_timestamp', bar_timestamp)
                 setattr(order, 'commission', commission)
+                setattr(order, 'pnl', realized_pnl) # Store realized PnL on the order object
                 
                 self.simulated_order_updates_log.append(order) # Add to the new log
                 del self.open_orders[order_id]
-                self.logger.info(f"{order_type_processed} order {order_id} for {order_quantity} {order_symbol} @ {actual_fill_price:.2f} COMPLETED. Commission: {commission:.2f}")
+                self.logger.info(f"{order_type_processed} order {order_id} for {order_quantity} {order_symbol} @ {actual_fill_price:.2f} COMPLETED. Commission: {commission:.2f}. Realized PnL: {realized_pnl:.2f}")
 
 
 

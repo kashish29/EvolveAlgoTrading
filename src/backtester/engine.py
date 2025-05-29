@@ -83,6 +83,7 @@ class BacktesterEngine:
 
         # 2. Main backtesting loop
         for current_timestamp, bars_for_timestamp in all_market_data:
+
             self.broker.current_time = current_timestamp
 
             active_bars_for_this_timestamp = {}

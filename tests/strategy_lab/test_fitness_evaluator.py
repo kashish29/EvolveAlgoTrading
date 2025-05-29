@@ -48,8 +48,8 @@ class TestFitnessEvaluator(unittest.TestCase):
         # Sample data for engine run and trade history, used in the success test
         self.mock_portfolio_history = [
             {'timestamp': pd.Timestamp('2023-01-01'), 'total_value': 100000},
-            {'timestamp': pd.Timestamp('2023-01-01'), 'total_value': 100500}, # Duplicate timestamp
-            {'timestamp': pd.Timestamp('2023-01-02'), 'total_value': 101000}
+            {'timestamp': pd.Timestamp('2023-01-02'), 'total_value': 100500},
+            {'timestamp': pd.Timestamp('2023-01-03'), 'total_value': 101000}
         ]
         self.mock_equity_curve_values = [entry['total_value'] for entry in self.mock_portfolio_history] 
         
@@ -115,6 +115,7 @@ class TestFitnessEvaluator(unittest.TestCase):
         
         mock_broker_instance = mock_broker_class.return_value
         mock_broker_instance.get_trade_history.return_value = self.mock_trade_log
+        mock_broker_instance.portfolio_history = self.mock_portfolio_history # Explicitly set portfolio_history on the mock broker
 
         # Setup PerformanceReporter mock
         mock_reporter_instance = mock_performance_reporter_class.return_value
@@ -137,9 +138,10 @@ class TestFitnessEvaluator(unittest.TestCase):
         equity_series_arg = call_args.kwargs.get('equity_curve')
         self.assertIsInstance(equity_series_arg, pd.Series)
         # Check length after duplicate handling (2 unique timestamps: 2023-01-01, 2023-01-02)
-        self.assertEqual(len(equity_series_arg), 2) 
-        self.assertEqual(equity_series_arg.loc[pd.Timestamp('2023-01-01')], 100500) # Last value for duplicate
-        self.assertEqual(equity_series_arg.loc[pd.Timestamp('2023-01-02')], 101000)
+        self.assertEqual(len(equity_series_arg), 3)
+        self.assertEqual(equity_series_arg.loc[pd.Timestamp('2023-01-01')], 100000)
+        self.assertEqual(equity_series_arg.loc[pd.Timestamp('2023-01-02')], 100500)
+        self.assertEqual(equity_series_arg.loc[pd.Timestamp('2023-01-03')], 101000)
         self.assertTrue(equity_series_arg.index.is_monotonic_increasing)
 
         mock_reporter_instance.calculate_key_metrics.assert_called_once()

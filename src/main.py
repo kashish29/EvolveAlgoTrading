@@ -51,13 +51,23 @@ def create_dummy_ohlcv_data(file_path: str, symbol: str, days: int = 60) -> None
     logger.info(f"Creating dummy OHLCV data at {file_path} for symbol {symbol}...")
     start_date = datetime(2023, 1, 1)
     data = []
-    base_price = 100
+    base_price = 100.0 # Changed to float
     for i in range(days):
         current_date = start_date + timedelta(days=i)
-        open_price = base_price + (i * 0.1) + random.uniform(-0.5, 0.5)
-        high_price = open_price + random.uniform(0, 2)
-        low_price = open_price - random.uniform(0, 2)
-        close_price = open_price + random.uniform(-1, 1)
+        # Introduce more significant price fluctuations to encourage crossovers
+        price_change = random.uniform(-5, 5) # Larger random changes
+        base_price += price_change
+        open_price = base_price + random.uniform(-1, 1)
+        high_price = open_price + abs(random.uniform(0, 3)) # Ensure high >= open
+        low_price = open_price - abs(random.uniform(0, 3))  # Ensure low <= open
+        close_price = open_price + random.uniform(-2, 2) # Close can be anywhere
+        
+        # Ensure prices are positive
+        open_price = max(1.0, open_price)
+        high_price = max(open_price, high_price) # High must be at least open
+        low_price = min(open_price, low_price)   # Low must be at most open
+        close_price = max(1.0, close_price)
+
         volume = random.randint(1000, 10000)
         data.append([current_date.strftime('%Y-%m-%d %H:%M:%S'), symbol, open_price, high_price, low_price, close_price, volume])
 
@@ -90,8 +100,8 @@ def run_strategy_lab_demo():
             "long_window": 15, 
             "quantity": 1
         },
-        "population_size": 10, 
-        "num_generations": 3 
+        "population_size": 4,
+        "num_generations": 2
     }
     logger.info(f"StrategyGenerator configured with: {generator_config['population_size']} population, {generator_config['num_generations']} generations.")
 
@@ -361,70 +371,82 @@ def run_live_simulation_demo():
 
 
 if __name__ == "__main__":
-    logger = logging.getLogger(__name__) 
+    logger = logging.getLogger(__name__)
+
+    print("\n" + "=" * 50)
+    print("Running End-to-End Backtesting Workflow with Analytics")
+    print("=" * 50 + "\n")
 
     # --- Backtester Demo Parameters ---
-    symbol = "SBIN_NSE" # Symbol for backtester demo
-    start_date = datetime(2023, 1, 1) # Corrected: datetime.datetime to datetime
-    end_date = datetime(2023, 1, 31)  # Corrected: datetime.datetime to datetime
-    # Timeframe for data generation and strategy (ensure consistency for backtester demo)
+    test_symbol = "DEFAULT_SYMBOL" # Symbol used in test_data.csv
+    test_data_file = "test_data/test_data.csv"
+    
+    # Load data from CSV
+    logger.info(f"Loading historical data from {test_data_file}...")
+    df = pd.read_csv(test_data_file, parse_dates=['timestamp'])
+    
+    # Determine start_date, end_date, and timeframe from loaded data
+    start_date_backtest = df['timestamp'].min()
+    end_date_backtest = df['timestamp'].max()
+    # Assuming 1-minute data based on the CSV content and previous context
+    data_timeframe_backtest = Timeframe.MINUTE_1
 
-    data_timeframe = Timeframe.DAY_1
-    initial_cash = 100000.0
-    commission_rate_broker = 0.0007  
+    initial_cash_backtest = 100000.0
+    commission_rate_backtest = 0.0002 # 0.02%
+    slippage_percent_backtest = 0.0001 # 0.01%
 
-    logger.info(f"Setting up backtest for {symbol} from {start_date.date()} to {end_date.date()} with {data_timeframe.value} timeframe.")
+    logger.info(f"Setting up backtest for {test_symbol} from {start_date_backtest} to {end_date_backtest} with {data_timeframe_backtest.value} timeframe.")
 
-    sample_candles: list[Candle] = []
-    current_date = start_date
-    days_generated = 0
-    base_open = 100.0
-    while current_date <= end_date and days_generated < 31: 
-        open_price = base_open + days_generated * 0.5
-        close_price = base_open + days_generated * 0.5 - (days_generated % 5) + 2  
-        if days_generated > 10 and days_generated < 20:  
-            close_price = base_open + days_generated * 0.5 - (days_generated % 3) - 5
-        if days_generated > 20:  
-            close_price = base_open + days_generated * 0.5 + (days_generated % 2) + 3
+    # Convert DataFrame to dictionary of Candle objects for MockFyersClient
+    # The CSV doesn't have a 'symbol' column, so we'll assume the test_symbol for all candles.
+    data_feeds: Dict[str, List[Candle]] = {test_symbol: []}
+    for _, row in df.iterrows():
+        candle = Candle(
+            symbol=test_symbol,
+            timestamp=row['timestamp'],
+            open=row['open'],
+            high=row['high'],
+            low=row['low'],
+            close=row['close'],
+            volume=row['volume'],
+            timeframe=data_timeframe_backtest # Assign the determined timeframe
+        )
+        data_feeds[test_symbol].append(candle)
 
-        sample_candles.append(Candle(
-            timestamp=current_date, symbol=symbol, open=open_price, high=open_price + 2.0, 
-            low=open_price - 2.0, close=close_price, volume=10000 + days_generated * 100,
-            timeframe=data_timeframe
-        ))
-        current_date += timedelta(days=1)
-        days_generated += 1
-
-    if not sample_candles:
-        logger.error("No sample candles generated. Exiting.")
-        exit()
-
-    data_feeds = {symbol: sample_candles}
-    logger.info(f"Generated {len(sample_candles)} sample candles for {symbol}.")
-
-    broker = MockFyersClient(
-        historical_data=data_feeds, initial_cash=initial_cash, commission_rate=commission_rate_broker
+    # Initialize MockFyersClient with the prepared data_feeds
+    broker_for_backtest = MockFyersClient(
+        historical_data=data_feeds, # Pass the converted data here
+        initial_cash=initial_cash_backtest,
+        commission_rate=commission_rate_backtest,
+        slippage_percent=slippage_percent_backtest
     )
-    hdm = HistoricalDataManager(broker_client=broker)
-    broker.connect()  
+    broker_for_backtest.connect()
 
-    strategy_config = {
-        "symbol": symbol, "short_window": 5, "long_window": 10,
-        "quantity": 10, "timeframe": data_timeframe 
+    # Initialize HistoricalDataManager by only passing the broker_client instance
+    hdm = HistoricalDataManager(broker_client=broker_for_backtest)
+
+    # Configure ExampleMovingAverageCrossStrategy
+    strategy_config_backtest = {
+        "symbol": test_symbol,
+        "short_window": 5,
+        "long_window": 10,
+        "quantity": 10,
+        "timeframe": data_timeframe_backtest.value # Pass the value of the enum
     }
-    strategy = ExampleMovingAverageCrossStrategy(
-        strategy_id="MA_Cross_1", broker=broker, config=strategy_config
+    strategy_backtest = ExampleMovingAverageCrossStrategy(
+        strategy_id="MA_Cross_Test", broker=broker_for_backtest, config=strategy_config_backtest
     )
 
+    # Initialize BacktesterEngine
     engine = BacktesterEngine(
-        strategy=strategy,
-        broker=broker,
+        strategy=strategy_backtest,
+        broker=broker_for_backtest,
         historical_data_manager=hdm,
-        symbols=[symbol],
-        timeframe=data_timeframe.value,
-        start_date=start_date,
-        end_date=end_date,
-        generate_analytics_report=True
+        symbols=[test_symbol],
+        timeframe=data_timeframe_backtest.value,
+        start_date=start_date_backtest,
+        end_date=end_date_backtest,
+        generate_analytics_report=True # Ensure report generation is enabled
     )
 
     logger.info("Starting backtest engine...")
@@ -434,16 +456,17 @@ if __name__ == "__main__":
     if equity_curve:
         logger.info(f"Final Portfolio Value: {equity_curve[-1]:.2f}")
     else:
-        logger.info(f"Final Portfolio Value (no trades or activity): {initial_cash:.2f}")
+        logger.info(f"Final Portfolio Value (no trades or activity): {initial_cash_backtest:.2f}")
 
     logger.info("Trade Log:")
-    trade_log = broker.get_trade_history()  
+    trade_log = broker_for_backtest.get_trade_history()
     if trade_log:
         for trade in trade_log:
+            # Access Trade object attributes directly
             trade_info = (
                 f"TradeID: {trade.trade_id}, OrderID: {trade.order_id}, Symbol: {trade.symbol}, "
                 f"Side: {trade.side.value}, Qty: {trade.quantity}, Price: {trade.price:.2f}, "
-                f"Comm: {trade.commission:.2f}, TS: {trade.timestamp}"
+                f"Comm: {trade.commission:.2f}, PnL: {trade.pnl:.2f}, TS: {trade.timestamp}"
             )
             logger.info(f"  {trade_info}")
     else:
@@ -459,118 +482,16 @@ if __name__ == "__main__":
         for sym, pos_details in snapshot.get('positions', {}).items():
             logger.info(f"    {sym}: Qty={pos_details.get('qty')}, AvgP={pos_details.get('avg_price', 0.0):.2f}, LastP={pos_details.get('last_price', 0.0):.2f}, MktVal={pos_details.get('market_value', 0.0):.2f}")
 
-    # Since the original main.py content for backtester demo is unknown/missing,
-    # this main block will only run the Strategy Lab Demo. (Comment from original file)
-    # Updated: Now runs backtester demo, strategy lab demo, and live simulation demo.
+    # Print path to generated QuantStats report
+    report_path = os.path.join(os.getcwd(), "quantstats_report.html")
+    logger.info(f"QuantStats report generated at: {report_path}")
+    print(f"\nQuantStats report generated at: {report_path}")
 
-    # --- Run Backtester Demo ---
-    # (The existing backtester demo code from the original file is assumed to be here)
-    # For brevity, the original backtester demo code is not fully repeated in this diff,
-    # but it should be preserved in the actual application of this change.
-    # The diff below this comment block shows where run_strategy_lab_demo() and run_live_simulation_demo() are added.
-    # The following lines are a placeholder for where the original backtester demo code was.
-    logger.info("Running original backtester demo setup...")
-    # ... (original backtester demo code from `symbol = "SBIN_NSE"` down to `broker.disconnect()` before `run_strategy_lab_demo()`)
-    # ... This includes setup of sample_candles, hdm, broker, strategy, engine, engine.run(), and printing results.
-    # The following is a highly condensed representation of that original backtester demo logic:
+    broker_for_backtest.disconnect()
+    print("\n" + "=" * 50)
+    print("End-to-End Backtesting Workflow with Analytics Finished")
+    print("=" * 50 + "\n")
 
-    data_timeframe_backtest = Timeframe.DAY_1 # Original used data_timeframe
-    initial_cash_backtest = 100000.0
-    commission_rate_broker_backtest = 0.0007
-
-    logger.info(f"Setting up backtest for {symbol} from {start_date.date()} to {end_date.date()} with {data_timeframe_backtest.value} timeframe.")
-    # Sample candles generation (simplified for diff)
-    sample_candles_backtest: list[Candle] = []
-    # ... (original sample_candles generation logic) ...
-    current_date_bt = start_date
-    days_generated_bt = 0
-    base_open_bt = 100.0
-    while current_date_bt <= end_date and days_generated_bt < 31:
-        open_price_bt = base_open_bt + days_generated_bt * 0.5 # Simplified
-        sample_candles_backtest.append(Candle(timestamp=current_date_bt,symbol=symbol,open=open_price_bt,high=open_price_bt+2,low=open_price_bt-2,close=open_price_bt+1,volume=1000,timeframe=data_timeframe_backtest))
-        current_date_bt += timedelta(days=1)
-        days_generated_bt +=1
-    if not sample_candles_backtest: logger.error("No sample candles for backtest. Exiting."); exit()
-    data_feeds_backtest = {symbol: sample_candles_backtest}
-    broker_backtest = MockFyersClient(historical_data=data_feeds_backtest, initial_cash=initial_cash_backtest, commission_rate=commission_rate_broker_backtest)
-    hdm_backtest = HistoricalDataManager(broker_client=broker_backtest)
-    broker_backtest.connect()
-    strategy_config_backtest = {"symbol": symbol, "short_window": 5, "long_window": 10, "quantity": 10, "timeframe": data_timeframe_backtest}
-    strategy_backtest = ExampleMovingAverageCrossStrategy(
-        strategy_id="MA_Cross_Backtest", broker=broker_backtest, config=strategy_config_backtest
-    )
-
-    engine_backtest = BacktesterEngine(
-        strategy=strategy_backtest,
-        broker=broker_backtest,
-        historical_data_manager=hdm_backtest,
-        symbols=[symbol],
-        timeframe=data_timeframe_backtest.value,
-        start_date=start_date,
-        end_date=end_date,
-        generate_analytics_report=True
-    )
-
-    logger.info("Starting backtest engine (from main.py __name__ == __main__ block)...")
-    equity_curve_backtest, portfolio_history_backtest = engine_backtest.run()
-    logger.info("Backtest engine finished (from main.py __name__ == __main__ block).")
-
-    if equity_curve_backtest:
-        logger.info(f"Final Portfolio Value (Backtest): {equity_curve_backtest[-1]:.2f}")
-    else:
-        logger.info(f"Final Portfolio Value (Backtest, no trades or activity): {initial_cash_backtest:.2f}")
-
-    logger.info("Trade Log (Backtest):")
-    trade_log_backtest = broker_backtest.get_trade_history()
-    if trade_log_backtest:
-        for trade in trade_log_backtest:
-            trade_info = (
-                f"TradeID: {trade.trade_id}, OrderID: {trade.order_id}, Symbol: {trade.symbol}, "
-                f"Side: {trade.side.value}, Qty: {trade.quantity}, Price: {trade.price:.2f}, "
-                f"Comm: {trade.commission:.2f}, TS: {trade.timestamp}"
-            )
-            logger.info(f"  {trade_info}")
-    else:
-        logger.info("  No trades executed (Backtest).")
-
-    logger.info("Portfolio History Snapshots (Backtest, last 5):")
-    for snapshot in portfolio_history_backtest[-5:]:
-        snap_info = (
-            f"TS: {snapshot.get('timestamp')}, Cash: {snapshot.get('cash', 0.0):.2f}, "
-            f"PositionsVal: {snapshot.get('positions_market_value', 0.0):.2f}, TotalVal: {snapshot.get('total_value', 0.0):.2f}"
-        )
-        logger.info(f"  {snap_info}")
-        for sym, pos_details in snapshot.get('positions', {}).items():
-            logger.info(f"    {sym}: Qty={pos_details.get('qty')}, AvgP={pos_details.get('avg_price', 0.0):.2f}, LastP={pos_details.get('last_price', 0.0):.2f}, MktVal={pos_details.get('market_value', 0.0):.2f}")
-
-    broker_backtest.disconnect()
-    logger.info("Backtester Demo Finished.\n" + "=" * 50 + "\n")
-
-    # --- Run Strategy Lab Demo ---
+    # Run Strategy Lab Demo
     run_strategy_lab_demo()
 
-    # --- Run Live Simulation Demo ---
-    run_live_simulation_demo()
-    strategy_backtest = ExampleMovingAverageCrossStrategy(strategy_id="MA_Cross_Backtest_1", broker=broker_backtest, config=strategy_config_backtest)
-    engine_backtest = BacktesterEngine(strategy=strategy_backtest, broker=broker_backtest, historical_data_manager=hdm_backtest, symbols=[symbol], timeframe=data_timeframe_backtest.value, start_date=start_date, end_date=end_date, generate_analytics_report=True)
-    logger.info("Starting backtest engine (main demo)...")
-    equity_curve_backtest, portfolio_history_backtest = engine_backtest.run()
-    logger.info("Backtest engine (main demo) finished.")
-    if equity_curve_backtest: logger.info(f"Backtest Final Portfolio Value: {equity_curve_backtest[-1]:.2f}")
-    # ... (original result printing logic) ...
-    broker_backtest.disconnect()
-    logger.info("Original backtester demo finished.")
-    # --- End of Placeholder for Original Backtester Demo ---
-
-
-    # --- Run Strategy Lab Demo ---
-    run_strategy_lab_demo() # This was already in the original file
-
-    # --- Run Live Simulation Demo ---
-    run_live_simulation_demo() # Newly added call
-
-    logger.info("All Demos finished. Main execution completed.")
-
-
-    broker.disconnect() 
-    logger.info("Main execution finished.")
