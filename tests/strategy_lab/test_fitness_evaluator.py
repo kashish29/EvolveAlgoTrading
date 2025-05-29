@@ -1,251 +1,185 @@
 import unittest
-from unittest.mock import patch, MagicMock, ANY # Added ANY
-import os
+from unittest.mock import patch, MagicMock, ANY
 import pandas as pd
-from datetime import datetime, timedelta
-import random
-import logging
-import importlib 
+from datetime import datetime, timezone
 
 from src.strategy_lab.fitness_evaluator import FitnessEvaluator
-from src.core.enums import Timeframe
-from src.strategies.base_strategy import BaseStrategy 
-
-engine_module = importlib.import_module("src.strategy_lab.evolutionary_engine")
-DEFAULT_STRATEGY_TEMPLATE_FOR_TEST = engine_module.DEFAULT_STRATEGY_TEMPLATE
-
-MINIMAL_VALID_STRATEGY_CODE = """
-import logging
-class EvolvedStrategy(BaseStrategy):
-    def __init__(self, strategy_id, broker, config):
-        super().__init__(strategy_id, broker, config)
-        self.symbol = config.get("symbol", "TEST_SYMBOL_MINIMAL")
-    def on_bar(self, current_bars):
-        pass
-"""
+from src.strategies.base_strategy import BaseStrategy as ActualBaseStrategy # Alias to avoid confusion
+from src.broker_api.mock_fyers_client import MockFyersClient as ActualMockFyersClient # For type hinting if needed
+from src.backtester.engine import BacktesterEngine as ActualBacktesterEngine # For type hinting if needed
+from src.analytics.performance_reporter import PerformanceReporter as ActualPerformanceReporter # For type hinting
+from src.core.models import Candle, Trade # For type hinting if needed
+from src.core.enums import OrderSide # For type hinting if needed
 
 class TestFitnessEvaluator(unittest.TestCase):
+    """
+    Test suite for the FitnessEvaluator class.
+    """
 
     def setUp(self):
-        self.evaluator = FitnessEvaluator(config={}) # Ensure config is passed
-        self.complex_strategy_code = DEFAULT_STRATEGY_TEMPLATE_FOR_TEST
-        self.minimal_strategy_code = MINIMAL_VALID_STRATEGY_CODE
+        self.valid_strategy_code = """
+from src.strategies.base_strategy import BaseStrategy
 
-        self.dummy_data_path = "test_ohlcv_data_fitness.csv" 
-        self.symbol = "TEST_SYM_FIT" 
-        self.strategy_config = {
-            "symbol": self.symbol,
-            "timeframe": Timeframe.DAY_1.value, 
-            "short_window": 10, 
-            "long_window": 20,
-            "quantity": 1 
-        }
-        self._create_dummy_csv(self.dummy_data_path, self.symbol, days=60)
-        
-        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
-        self.logger.setLevel(logging.CRITICAL + 1) 
+class EvolvedStrategy(BaseStrategy):
+    def __init__(self, broker_client, config):
+        super().__init__(broker_client, config)
+        self.symbol = config.get('symbol', 'DEFAULT_SYMBOL')
+        self.quantity = config.get('quantity', 1)
 
-        # Sample data for engine run and trade history, used in the success test
-        self.mock_portfolio_history = [
-            {'timestamp': pd.Timestamp('2023-01-01'), 'total_value': 100000},
-            {'timestamp': pd.Timestamp('2023-01-02'), 'total_value': 100500},
-            {'timestamp': pd.Timestamp('2023-01-03'), 'total_value': 101000}
-        ]
-        self.mock_equity_curve_values = [entry['total_value'] for entry in self.mock_portfolio_history] 
-        
-        self.mock_trade_log = [
-            {'pnl': 100.0, 'symbol': 'TEST_SYM_FIT', 'timestamp': pd.Timestamp('2023-01-02 10:00:00'), 
-             'side': 'BUY', 'quantity': 10, 'price': 100.0, 'commission': 1.0},
-            {'pnl': 50.0, 'symbol': 'TEST_SYM_FIT', 'timestamp': pd.Timestamp('2023-01-03 10:00:00'), 
-             'side': 'SELL', 'quantity': 5, 'price': 101.0, 'commission': 0.5}
-        ]
-        
-        self.expected_metrics_from_reporter = {
-            "Total Return [%]": 1.0, "CAGR [%]": 1.0, "Sharpe Ratio": 1.5, 
-            "Sortino Ratio": 2.0, "Max Drawdown [%]": 5.0, "Calmar Ratio": 0.5,
-            "Total Trades": 2, "Win Rate [%]": 100.0, "Profit Factor": float('inf'), 
-            "Avg Winning Trade PnL": 75.0, "Avg Losing Trade PnL": 0.0,
-        }
+    def on_bar(self, current_bar_data: dict):
+        # print(f"EvolvedStrategy on_bar: {current_bar_data}")
+        pass
+"""
+        self.historical_data_path = "dummy_fitness_data.csv"
+        self.strategy_config = {'symbol': 'SYM1', 'timeframe': '1D', 'quantity': 10}
+        self.start_date = datetime(2023, 1, 1, tzinfo=timezone.utc)
+        self.end_date = datetime(2023, 1, 10, tzinfo=timezone.utc)
 
-
-    def tearDown(self):
-        if os.path.exists(self.dummy_data_path):
-            os.remove(self.dummy_data_path)
-        self.logger.setLevel(logging.NOTSET)
-
-
-    def _create_dummy_csv(self, file_path, symbol, days):
-        start_date = datetime(2023, 1, 1)
-        data = []
-        base_price = 100.0
-        for i in range(days):
-            current_date = start_date + timedelta(days=i)
-            open_p = float(base_price + i * 0.1 + random.uniform(-0.05, 0.05) * base_price)
-            close_p = float(base_price + i * 0.15 + random.uniform(-0.05, 0.05) * base_price)
-            high_p = float(max(open_p, close_p) + random.uniform(0, 0.02) * base_price)
-            low_p = float(min(open_p, close_p) - random.uniform(0, 0.02) * base_price)
-            volume = random.randint(1000, 5000)
-            data.append([current_date.strftime('%Y-%m-%d %H:%M:%S'), symbol, 
-                         round(open_p,2), round(high_p,2), round(low_p,2), round(close_p,2), volume])
-        df = pd.DataFrame(data, columns=['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume'])
-        df.to_csv(file_path, index=False)
-
-    @patch('src.strategy_lab.fitness_evaluator.pd.read_csv')
-    @patch('src.strategy_lab.fitness_evaluator.BacktesterEngine')      
-    @patch('src.strategy_lab.fitness_evaluator.MockFyersClient')       
+        # Default evaluator
+        self.evaluator = FitnessEvaluator(
+            start_date=self.start_date,
+            end_date=self.end_date,
+            initial_cash=100000,
+            commission_per_trade=0.01,
+            slippage_percent=0.001
+        )
+    
+    @patch('src.strategy_lab.fitness_evaluator.PerformanceReporter')
+    @patch('src.strategy_lab.fitness_evaluator.BacktesterEngine')
     @patch('src.strategy_lab.fitness_evaluator.HistoricalDataManager') 
-    @patch('src.strategy_lab.fitness_evaluator.PerformanceReporter') # Added patch for PerformanceReporter
-    def test_evaluate_strategy_success_with_performance_reporter(self, 
-                                                                 mock_performance_reporter_class, # Correct order
-                                                                 mock_hdm_class, 
-                                                                 mock_broker_class, 
-                                                                 mock_engine_class, 
-                                                                 mock_read_csv):
-        # Setup mocks for file reading and backtesting components
+    @patch('src.strategy_lab.fitness_evaluator.MockFyersClient')
+    @patch('pandas.read_csv')
+    def test_successful_strategy_evaluation_flow(self, mock_read_csv, MockedBroker, 
+                                                 MockedHDM, MockedEngine, MockedReporter):
+        # 4.c. Mock pd.read_csv
         mock_df = pd.DataFrame({
-            'timestamp': pd.to_datetime(['2023-01-01', '2023-01-02', '2023-01-03']), 
-            'open': [100,100,100], 'high': [101,101,101], 'low': [99,99,99], 
-            'close': [100,100,100], 'volume': [1000,1000,1000]
+            'timestamp': pd.to_datetime(['2023-01-01', '2023-01-02']),
+            'open': [100, 101], 'high': [102, 103], 'low': [99, 100],
+            'close': [101, 102], 'volume': [1000, 1000]
         })
         mock_read_csv.return_value = mock_df
-        
-        mock_engine_instance = mock_engine_class.return_value
-        # engine.run() returns (raw_equity_values, portfolio_history)
-        mock_engine_instance.run.return_value = (self.mock_equity_curve_values, self.mock_portfolio_history) 
-        
-        mock_broker_instance = mock_broker_class.return_value
-        mock_broker_instance.get_trade_history.return_value = self.mock_trade_log
-        mock_broker_instance.portfolio_history = self.mock_portfolio_history # Explicitly set portfolio_history on the mock broker
 
-        # Setup PerformanceReporter mock
-        mock_reporter_instance = mock_performance_reporter_class.return_value
-        mock_reporter_instance.calculate_key_metrics.return_value = self.expected_metrics_from_reporter
+        # 4.h. Configure MockedEngine
+        MockedEngine.return_value.run.return_value = ([], []) # (raw_equity_values, engine_portfolio_history)
+
+        # 4.i. Configure broker.portfolio_history for PerformanceReporter
+        mock_broker_instance = MockedBroker.return_value 
+        sample_broker_portfolio_history = [
+            {'timestamp': datetime(2023,1,1, tzinfo=timezone.utc), 'total_value': 100000, 'cash': 100000, 'positions_market_value': 0},
+            {'timestamp': datetime(2023,1,2, tzinfo=timezone.utc), 'total_value': 101000, 'cash': 90000, 'positions_market_value': 11000}
+        ]
+        # Make portfolio_history an attribute of the mock instance
+        mock_broker_instance.portfolio_history = sample_broker_portfolio_history
         
-        # Execute
+        # 4.j. Configure get_trade_history
+        mock_broker_instance.get_trade_history.return_value = []
+
+        # 4.k. Configure MockedReporter
+        # Using a more complete set of metrics as FitnessEvaluator selects specific ones
+        mocked_metrics_output = {
+            "Sharpe Ratio": 1.5, "Total Return [%]": 10.0, "Max Drawdown [%]": -5.0, 
+            "Profit Factor": 2.0, "CAGR [%]": 12.0, "Win Rate [%]": 60.0, 
+            "Total Trades": 10, "Avg Trade PnL": 100.0
+        }
+        MockedReporter.return_value.calculate_key_metrics.return_value = mocked_metrics_output
+
+        # 4.l. Call evaluate_strategy
         result = self.evaluator.evaluate_strategy(
-            self.complex_strategy_code, self.dummy_data_path, self.strategy_config 
+            self.valid_strategy_code, 
+            self.historical_data_path, 
+            self.strategy_config
+        )
+
+        # 4.m. Assert pd.read_csv
+        mock_read_csv.assert_called_once_with(self.historical_data_path)
+
+        # 4.n. Assert MockedEngine was instantiated
+        MockedEngine.assert_called_once()
+        engine_args, engine_kwargs = MockedEngine.call_args
+        self.assertIsInstance(engine_kwargs['strategy'], ActualBaseStrategy) 
+        self.assertIs(engine_kwargs['broker'], mock_broker_instance)
+        self.assertIsInstance(engine_kwargs['historical_data_manager'], MockedHDM.return_value.__class__)
+        self.assertEqual(engine_kwargs['symbols_to_trade'], [self.strategy_config['symbol']])
+        self.assertEqual(engine_kwargs['timeframe'], self.strategy_config['timeframe'])
+
+
+        # 4.o. Assert MockedEngine.return_value.run was called
+        MockedEngine.return_value.run.assert_called_once()
+
+        # 4.p. Assert MockedBroker.return_value.get_trade_history was called
+        mock_broker_instance.get_trade_history.assert_called_once()
+
+        # 4.q. Assert MockedReporter was instantiated
+        MockedReporter.assert_called_once()
+        reporter_args, reporter_kwargs = MockedReporter.call_args
+        
+        expected_equity_series = pd.Series(
+            [d['total_value'] for d in sample_broker_portfolio_history], 
+            index=pd.to_datetime([d['timestamp'] for d in sample_broker_portfolio_history])
+        )
+        pd.testing.assert_series_equal(reporter_kwargs['equity_curve_series'], expected_equity_series, check_names=False)
+        
+        self.assertIsInstance(reporter_kwargs['trades_df'], pd.DataFrame)
+        self.assertTrue(reporter_kwargs['trades_df'].empty)
+
+
+        # 4.r. Assert MockedReporter.return_value.calculate_key_metrics was called
+        MockedReporter.return_value.calculate_key_metrics.assert_called_once()
+
+        # 4.s. Assert the result
+        # FitnessEvaluator selects specific keys from the reporter's output
+        expected_result = {
+            "Total Return [%]": 10.0, "Sharpe Ratio": 1.5, "Max Drawdown [%]": -5.0,
+            "Profit Factor": 2.0, "CAGR [%]": 12.0, "error": None # error is None on success
+        }
+        self.assertEqual(result, expected_result)
+
+
+    def test_strategy_code_execution_error(self):
+        # 5.a. Provide strategy_code_string
+        invalid_code = "raise SyntaxError('test syntax error')"
+        
+        # 5.b. Call evaluate_strategy
+        result = self.evaluator.evaluate_strategy(
+            invalid_code, 
+            self.historical_data_path, 
+            self.strategy_config
         )
         
+        # 5.c. Assert error key
+        self.assertIn('error', result)
+        self.assertIsNotNone(result['error'])
+        self.assertIn("Error executing strategy code: SyntaxError('test syntax error')", result['error'])
+        # Check default fitness values for error case
+        self.assertEqual(result["Total Return [%]"], -100.0) 
+        self.assertEqual(result["Sharpe Ratio"], -10.0)
+        self.assertEqual(result["Max Drawdown [%]"], -100.0)
+        self.assertEqual(result["Profit Factor"], 0.0)
+        self.assertEqual(result["CAGR [%]"], -100.0)
 
-        mock_performance_reporter_class.assert_called_once()
-        call_args = mock_performance_reporter_class.call_args
+
+    @patch('pandas.read_csv')
+    def test_historical_data_not_found(self, mock_read_csv):
+        # 6.a. Mock pd.read_csv to raise FileNotFoundError
+        mock_read_csv.side_effect = FileNotFoundError("File not found test error")
         
-        trades_df_arg = call_args.kwargs.get('trades')
-        self.assertIsInstance(trades_df_arg, pd.DataFrame)
-        self.assertEqual(len(trades_df_arg), len(self.mock_trade_log))
-        self.assertEqual(trades_df_arg.iloc[0]['pnl'], self.mock_trade_log[0]['pnl'])
-
-        equity_series_arg = call_args.kwargs.get('equity_curve')
-        self.assertIsInstance(equity_series_arg, pd.Series)
-        # Check length after duplicate handling (2 unique timestamps: 2023-01-01, 2023-01-02)
-        self.assertEqual(len(equity_series_arg), 3)
-        self.assertEqual(equity_series_arg.loc[pd.Timestamp('2023-01-01')], 100000)
-        self.assertEqual(equity_series_arg.loc[pd.Timestamp('2023-01-02')], 100500)
-        self.assertEqual(equity_series_arg.loc[pd.Timestamp('2023-01-03')], 101000)
-        self.assertTrue(equity_series_arg.index.is_monotonic_increasing)
-
-        mock_reporter_instance.calculate_key_metrics.assert_called_once()
+        # 6.c. Call evaluate_strategy
+        result = self.evaluator.evaluate_strategy(
+            self.valid_strategy_code, 
+            "non_existent_path.csv", 
+            self.strategy_config
+        )
         
-        # Verify that the results from evaluate_strategy match what mock_calculate_key_metrics returned
-        for key, expected_value in self.expected_metrics_from_reporter.items():
-            self.assertEqual(result.get(key), expected_value, f"Metric '{key}' did not match. Got {result.get(key)}, expected {expected_value}")
-        self.assertNotIn('error', result) # Assuming successful run means no 'error' field or it's None/benign.
-                                         # FitnessEvaluator logic merges defaults, so error field might exist if not popped.
-                                         # Current FE code: final_metrics.pop("error", None)
-        
-        # Check if BacktesterEngine was called with generate_analytics_report=False
-        engine_call_args = mock_engine_class.call_args
-        self.assertFalse(engine_call_args.kwargs.get('generate_analytics_report', True))
-
-
-    # --- Tests for _convert_trades_to_dataframe ---
-    def test_convert_trades_to_dataframe_empty(self):
-        df = self.evaluator._convert_trades_to_dataframe([])
-        self.assertTrue(df.empty)
-
-    def test_convert_trades_to_dataframe_normal_data(self):
-        trades = [
-            {'symbol': 'AAPL', 'side': 'BUY', 'quantity': 10, 'price': 150.0, 'timestamp': '2023-01-01 10:00:00', 'pnl': 50.0, 'commission': 5.0},
-            {'symbol': 'GOOG', 'side': 'SELL', 'quantity': 5, 'price': 2500.0, 'timestamp': '2023-01-02 11:00:00', 'pnl': -20.0, 'commission': 10.0}
-        ]
-        df = self.evaluator._convert_trades_to_dataframe(trades)
-        self.assertEqual(len(df), 2)
-        self.assertEqual(df.loc[0, 'symbol'], 'AAPL')
-        self.assertEqual(df.loc[1, 'pnl'], -20.0)
-        self.assertTrue(pd.api.types.is_datetime64_any_dtype(df['timestamp']))
-        self.assertTrue(pd.api.types.is_numeric_dtype(df['pnl']))
-        self.assertTrue(pd.api.types.is_numeric_dtype(df['commission']))
-
-    def test_convert_trades_to_dataframe_missing_columns(self):
-        trades = [
-            {'symbol': 'AAPL', 'side': 'BUY', 'quantity': 10, 'price': 150.0, 'timestamp': '2023-01-01 10:00:00'}, # Missing pnl, commission
-        ]
-        df = self.evaluator._convert_trades_to_dataframe(trades)
-        self.assertEqual(df.loc[0, 'pnl'], 0.0) # Should default to 0.0
-        self.assertTrue('commission' in df.columns) # Should be added
-        self.assertEqual(df.loc[0, 'commission'], 0.0) # Should default to 0.0 if added by _convert_trades
-
-    def test_convert_trades_to_dataframe_mixed_types_and_nan(self):
-        trades = [
-            {'symbol': 'A', 'side': 'BUY', 'quantity': '10', 'price': '150.0', 'timestamp': '2023-01-01', 'pnl': '50.0'},
-            {'symbol': 'B', 'side': 'SELL', 'quantity': 5, 'price': None, 'timestamp': pd.NaT, 'pnl': -20.0, 'commission': 'abc'}
-        ]
-        df = self.evaluator._convert_trades_to_dataframe(trades)
-        self.assertEqual(df.loc[0, 'quantity'], 10)
-        self.assertEqual(df.loc[0, 'price'], 150.0)
-        self.assertEqual(df.loc[0, 'pnl'], 50.0)
-        self.assertTrue(pd.isna(df.loc[1, 'timestamp'])) # Timestamp NaT
-        self.assertEqual(df.loc[1, 'price'], 0.0)      # Price None -> 0.0 by fillna(0) after to_numeric
-        self.assertEqual(df.loc[1, 'commission'], 0.0) # 'abc' -> NaN by coerce -> 0.0 by fillna(0)
-
-    # --- Existing Error Case Tests (adjust assertions for new default_error_metrics keys if needed) ---
-    def test_evaluate_strategy_invalid_code(self):
-        invalid_code = "class EvolvedStrategy(): def __init__(self): pass this is not valid python"
-        result = self.evaluator.evaluate_strategy(invalid_code, self.dummy_data_path, self.strategy_config)
+        # 6.d. Assert error key
         self.assertIn('error', result)
-        self.assertTrue("Error executing strategy code" in result['error'] or "SyntaxError" in result['error'])
-        self.assertEqual(result.get('Sharpe Ratio'), -float('inf')) # Check a key from new default_error_metrics
+        self.assertIsNotNone(result['error'])
+        self.assertIn("Error loading historical data: File not found test error", result['error'])
+        self.assertEqual(result["Total Return [%]"], -100.0) 
+        self.assertEqual(result["Sharpe Ratio"], -10.0)
+        self.assertEqual(result["Max Drawdown [%]"], -100.0)
+        self.assertEqual(result["Profit Factor"], 0.0)
+        self.assertEqual(result["CAGR [%]"], -100.0)
 
-    def test_evaluate_strategy_no_strategy_class(self):
-        code_no_class = "MY_VARIABLE = 123\nprint('hello world, no strategy here')"
-        result = self.evaluator.evaluate_strategy(code_no_class, self.dummy_data_path, self.strategy_config)
-        self.assertIn('error', result)
-        self.assertIn("No 'EvolvedStrategy' or BaseStrategy subclass found in strategy code.", result['error'])
-        self.assertEqual(result.get('Total Trades'), 0) # Check a key from new default_error_metrics
-
-    def test_evaluate_strategy_data_file_not_found(self):
-        result = self.evaluator.evaluate_strategy(self.minimal_strategy_code, "non_existent_file.csv", self.strategy_config)
-        self.assertIn('error', result)
-        self.assertIn("Historical data file not found", result['error'])
-        self.assertEqual(result.get('Max Drawdown [%]'), float('inf')) # Check a key from new default_error_metrics
-
-    @patch('src.strategy_lab.fitness_evaluator.pd.read_csv') 
-    def test_evaluate_strategy_malformed_csv(self, mock_read_csv):
-        mock_read_csv.side_effect = pd.errors.ParserError("Test Malformed CSV")
-        result = self.evaluator.evaluate_strategy(self.minimal_strategy_code, self.dummy_data_path, self.strategy_config)
-        self.assertIn('error', result)
-        self.assertTrue("Error loading or processing historical data" in result['error'] or "Test Malformed CSV" in result['error'])
-        self.assertEqual(result.get('Profit Factor'), 0.0) # Check a key
-
-    @patch('src.strategy_lab.fitness_evaluator.BacktesterEngine.run') 
-    def test_evaluate_strategy_backtester_error(self, mock_engine_run):
-        mock_engine_run.side_effect = Exception("Test Backtester crashed")
-        result = self.evaluator.evaluate_strategy(self.minimal_strategy_code, self.dummy_data_path, self.strategy_config)
-        self.assertIn('error', result)
-        self.assertTrue("Error during backtest execution" in result['error'] or "Test Backtester crashed" in result['error']) 
-        self.assertEqual(result.get('Win Rate [%]'), 0.0) # Check a key
-
-    def test_evaluate_strategy_empty_csv(self):
-        empty_csv_path = "empty_test_data_fitness.csv" 
-        with open(empty_csv_path, 'w') as f:
-            f.write("timestamp,symbol,open,high,low,close,volume\n") 
-            
-        result = self.evaluator.evaluate_strategy(self.minimal_strategy_code, empty_csv_path, self.strategy_config)
-        self.assertIn('error', result)
-        self.assertTrue("Historical data CSV is empty" in result['error'] or "No candles processed" in result['error'] or "No data found for symbol" in result['error'])
-        self.assertEqual(result.get('Total Return [%]'), -float('inf')) # Check a key
-        if os.path.exists(empty_csv_path): 
-            os.remove(empty_csv_path)
 
 if __name__ == '__main__':
     unittest.main()
