@@ -43,15 +43,19 @@ class DataFeedSimulator:
                 event_symbol = row.get('symbol', self.default_symbol)
                 
                 # Handle timeframe: use column if present and valid, else default
-                timeframe_value = row.get('timeframe', self.default_timeframe)
-                if not isinstance(timeframe_value, Timeframe):
-                    # Attempt to convert if it's a string that matches a Timeframe member, e.g. "1minute"
+                timeframe_input_str_or_enum = row.get('timeframe', self.default_timeframe)
+                if isinstance(timeframe_input_str_or_enum, Timeframe):
+                    timeframe_value = timeframe_input_str_or_enum
+                else: # It's a string or something else, try to convert
+                    timeframe_str = str(timeframe_input_str_or_enum)
                     try:
-                        timeframe_value = Timeframe(timeframe_value)
+                        timeframe_value = Timeframe(timeframe_str) # Try by value (e.g., "1MIN", "1D")
                     except ValueError:
-                        self.logger.warning(f"Invalid timeframe value '{timeframe_value}' in data, using default {self.default_timeframe.value}. Row: {row.to_dict()}")
-                        timeframe_value = self.default_timeframe
-
+                        try:
+                            timeframe_value = Timeframe[timeframe_str.upper()] # Try by name (e.g., "MINUTE_1", "DAY_1")
+                        except KeyError:
+                            self.logger.warning(f"Invalid timeframe string '{timeframe_str}' in data, using default {self.default_timeframe.value}. Row: {row.to_dict()}")
+                            timeframe_value = self.default_timeframe
 
                 market_data_event = Candle(
                     timestamp=pd.to_datetime(row['timestamp']), # Ensure timestamp is datetime

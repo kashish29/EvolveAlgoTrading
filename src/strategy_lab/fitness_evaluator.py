@@ -154,7 +154,7 @@ class FitnessEvaluator:
         
         exec_globals = {
             'BaseStrategy': ActualBaseStrategy, 'src': src, '__builtins__': __builtins__,
-            'List': List, 'Dict': Dict, # Explicitly add typing generics
+            'List': List, 'Dict': Dict, 'Optional': Optional, 'Any': Any, # Added Any
             # Explicitly add core models for strategy code execution
             'Order': src.core.models.Order,
             'OrderType': src.core.models.OrderType,

@@ -44,12 +44,14 @@ def calculate_sharpe_ratio(equity_curve: List[float], risk_free_rate_annual: flo
     mean_excess_return = np.mean(excess_returns)
     std_dev_excess_return = np.std(excess_returns)
     
-    if std_dev_excess_return == 0:
-        # If std_dev is 0, it means all excess returns are the same.
-        # If mean_excess_return is also 0, Sharpe is undefined (0).
-        # If mean_excess_return > 0, Sharpe is inf.
-        # If mean_excess_return < 0, Sharpe is -inf.
-        return float('inf') if mean_excess_return > 0 else float('-inf') if mean_excess_return < 0 else 0.0
+    # Use np.isclose for floating point comparisons to zero
+    if np.isclose(std_dev_excess_return, 0):
+        if np.isclose(mean_excess_return, 0):
+            return 0.0
+        elif mean_excess_return > 0:
+            return float('inf')
+        else: # mean_excess_return < 0
+            return float('-inf')
         
     sharpe_ratio = (mean_excess_return / std_dev_excess_return) * np.sqrt(trading_days_per_year)
     return sharpe_ratio
@@ -80,12 +82,19 @@ def calculate_sortino_ratio(equity_curve: List[float], risk_free_rate_annual: fl
 
     downside_deviation = np.std(negative_excess_returns)
     
-    if downside_deviation == 0:
-        # This case implies all negative returns are identical (or only one negative return and std is 0)
-        # Or no negative returns (already handled above).
-        # If mean_excess_return > 0, Sortino is inf.
-        return float('inf') if mean_excess_return > 0 else 0.0 # if mean_excess_return is also 0 or negative
-
+    # Use np.isclose for floating point comparisons to zero
+    if np.isclose(downside_deviation, 0):
+        if np.isclose(mean_excess_return, 0):
+            return 0.0
+        elif mean_excess_return > 0:
+            return float('inf')
+        else: # mean_excess_return < 0 (and downside_deviation is effectively 0)
+             # This case is debatable: negative return with no downside risk?
+             # Could be -inf, or 0 if we consider no "risk" as per Sortino's definition.
+             # Standardly, if mean_excess_return < 0 and downside_dev is 0, Sortino is often -inf or undefined.
+             # Let's return 0.0 for consistency if mean_excess_return is not positive.
+            return 0.0
+            
     sortino_ratio = (mean_excess_return / downside_deviation) * np.sqrt(trading_days_per_year)
     return sortino_ratio
 

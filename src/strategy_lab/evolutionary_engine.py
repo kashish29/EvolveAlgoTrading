@@ -239,8 +239,8 @@ class EvolutionaryEngine:
                  offspring_sw = max(self.param_ranges["short_window"][0], offspring_sw) # Ensure sw doesn't go below its global min
                  min_possible_lw = offspring_sw + 1 # Re-calculate min_possible_lw based on new offspring_sw
             
-            # Set offspring_lw to a random value within the valid adjusted range.
-            offspring_lw = random.randint(min_possible_lw, max_possible_lw)
+            # Make adjustment deterministic: prefer smallest valid long window.
+            offspring_lw = min_possible_lw if min_possible_lw <= max_possible_lw else max_possible_lw
             
         offspring_code = str(self.initial_strategy_template)
         offspring_code = self._change_param_in_code(offspring_code, "short_window", offspring_sw)

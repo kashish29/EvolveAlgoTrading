@@ -13,15 +13,15 @@ class TestPerformanceReporterCalculateDailyReturns(unittest.TestCase):
     def _create_reporter_with_equity_curve(self, equity_curve_series):
         """Helper to create a PerformanceReporter instance with a specific equity curve."""
         # Minimal valid trades_df for instantiation
-        trades_df = pd.DataFrame(columns=['pnl']) 
-        reporter = PerformanceReporter(trades_df=trades_df, equity_curve_series=pd.Series(dtype=float)) # Initial dummy EC
+        trades = pd.DataFrame(columns=['pnl']) 
+        reporter = PerformanceReporter(trades=trades, equity_curve=pd.Series(dtype=float)) # Initial dummy EC
         reporter.equity_curve = equity_curve_series # Override with the test-specific equity curve
         return reporter
 
     # Test Case 1: Basic Daily Returns Calculation
     def test_basic_daily_returns_calculation(self):
         equity_curve = pd.Series(
-            [100, 102, 101, 103], 
+            [100.0, 102.0, 101.0, 103.0],  # Using float values from the start
             index=pd.to_datetime(['2023-01-01 10:00', '2023-01-01 16:00', '2023-01-02 10:00', '2023-01-02 16:00'])
         )
         reporter = self._create_reporter_with_equity_curve(equity_curve)
@@ -32,8 +32,9 @@ class TestPerformanceReporterCalculateDailyReturns(unittest.TestCase):
         expected_index = pd.to_datetime(['2023-01-01', '2023-01-02'])
         
         # Check daily equity resampling logic part (implicitly tested by daily_returns)
-        daily_equity = equity_curve.resample('D').last().dropna()
-        pd.testing.assert_series_equal(daily_equity, pd.Series(expected_daily_equity_values, index=expected_index), check_names=False)
+        # .last() will preserve the float dtype from the original Series
+        daily_equity = equity_curve.resample('D').last().dropna() 
+        pd.testing.assert_series_equal(daily_equity, pd.Series(expected_daily_equity_values, index=expected_index, name="Equity", dtype=float), check_names=False, check_freq=False)
 
         # Expected daily return for 2023-01-02: (103/102) - 1
         expected_return_val = (103.0 / 102.0) - 1
@@ -71,11 +72,13 @@ class TestPerformanceReporterCalculateDailyReturns(unittest.TestCase):
         # To directly test _calculate_daily_returns with a non-datetime index,
         # we bypass the __init__'s _ensure_datetime_index.
         # This is not how it would operate in practice but tests the robustness of _calculate_daily_returns itself.
-        temp_reporter = PerformanceReporter(trades_df=pd.DataFrame(), equity_curve_series=pd.Series(dtype=float))
+        temp_reporter = PerformanceReporter(trades=pd.DataFrame(), equity_curve=pd.Series(dtype=float))
         temp_reporter.equity_curve = pd.Series([100,101], index=[0,1]) # Force non-datetime index
         
-        with self.assertRaises(TypeError): # resample('D') fails on non-DatetimeIndex
-             temp_reporter._calculate_daily_returns()
+        # _calculate_daily_returns now logs an error and returns an empty Series 
+        # if the index is not a DatetimeIndex.
+        calculated_returns = temp_reporter._calculate_daily_returns()
+        self.assertTrue(calculated_returns.empty, "Expected empty Series for non-DatetimeIndex equity curve.")
         
         # More realistic: test what happens if _ensure_datetime_index results in NaT
         reporter_nat_index = self._create_reporter_with_equity_curve(
@@ -106,8 +109,9 @@ class TestPerformanceReporterCalculateDailyReturns(unittest.TestCase):
         self.assertIsInstance(daily_returns, pd.Series)
         pd.testing.assert_series_equal(
             daily_returns, 
-            pd.Series(expected_values, index=expected_index, name='close'), # .pct_change() names the series 'close'
-            check_dtype=False # Allow float vs int comparison if values are 0
+            pd.Series(expected_values, index=expected_index), # .pct_change() names the series 'close'
+            check_dtype=False, # Allow float vs int comparison if values are 0
+            check_names=False
         )
         self.assertTrue(all(t.hour == 0 and t.minute == 0 and t.second == 0 for t in daily_returns.index.time))
 

@@ -26,7 +26,8 @@ class TestExampleMovingAverageCrossStrategy(unittest.TestCase):
             'quantity': self.quantity
         }
         self.strategy = ExampleMovingAverageCrossStrategy(
-            broker_client=self.mock_broker,
+            strategy_id="test_sma_cross_strategy", # Added strategy_id
+            broker=self.mock_broker,              # Changed broker_client to broker
             config=self.strategy_config
         )
         # Reset internal state for each test if necessary (strategy should ideally handle this or be fresh)
@@ -67,7 +68,7 @@ class TestExampleMovingAverageCrossStrategy(unittest.TestCase):
         
         for i in range(len(timestamps)):
             candle = self._create_candle(timestamps[i], close_prices[i])
-            self.strategy.on_bar(candle)
+            self.strategy.on_bar({self.symbol: candle}) # Pass as Dict
 
         self.assertEqual(len(self.strategy.prices), len(close_prices))
         self.assertEqual(self.strategy.prices, close_prices)
@@ -85,20 +86,21 @@ class TestExampleMovingAverageCrossStrategy(unittest.TestCase):
         # Bar 6 (idx 5): MA([11,12,13,14,15]) = 13
         expected_long_ma = [np.nan, np.nan, np.nan, np.nan, 12.0, 13.0]
 
-        # Check internal state (assuming strategy stores MAs with NaNs for alignment or similar)
-        # The actual storage might differ, this tests the concept.
-        # If strategy only stores valid MAs, lengths and values would be different.
-        # Based on typical strategy logic, they'd align with price length after padding.
-        for i in range(len(self.strategy.prices)):
-            if i < self.short_window -1 :
-                self.assertTrue(np.isnan(self.strategy.short_ma_values[i]) if len(self.strategy.short_ma_values) > i else True)
-            else:
-                self.assertAlmostEqual(self.strategy.short_ma_values[i], expected_short_ma[i])
-            
-            if i < self.long_window -1:
-                 self.assertTrue(np.isnan(self.strategy.long_ma_values[i]) if len(self.strategy.long_ma_values) > i else True)
-            else:
-                self.assertAlmostEqual(self.strategy.long_ma_values[i], expected_long_ma[i])
+        # Check internal state: The strategy only stores non-None MAs.
+        
+        # Short MA checks
+        num_expected_short_ma = len(close_prices) - self.short_window + 1
+        self.assertEqual(len(self.strategy.short_ma_values), num_expected_short_ma)
+        valid_expected_short_ma = [x for x in expected_short_ma if not np.isnan(x)]
+        for i in range(num_expected_short_ma):
+            self.assertAlmostEqual(self.strategy.short_ma_values[i], valid_expected_short_ma[i])
+
+        # Long MA checks
+        num_expected_long_ma = len(close_prices) - self.long_window + 1
+        self.assertEqual(len(self.strategy.long_ma_values), num_expected_long_ma)
+        valid_expected_long_ma = [x for x in expected_long_ma if not np.isnan(x)]
+        for i in range(num_expected_long_ma):
+            self.assertAlmostEqual(self.strategy.long_ma_values[i], valid_expected_long_ma[i])
 
     # Test Case 3: on_bar() - BUY Order Generation Logic
     def test_on_bar_buy_order_generation(self):
@@ -129,7 +131,7 @@ class TestExampleMovingAverageCrossStrategy(unittest.TestCase):
 
         # Triggering candle
         buy_trigger_candle = self._create_candle(datetime(2023,1,self.long_window + 1, tzinfo=timezone.utc), 15.0)
-        self.strategy.on_bar(buy_trigger_candle)
+        self.strategy.on_bar({self.symbol: buy_trigger_candle}) # Pass as Dict
 
         self.mock_broker.place_order.assert_called_once()
         args, _ = self.mock_broker.place_order.call_args
@@ -142,8 +144,8 @@ class TestExampleMovingAverageCrossStrategy(unittest.TestCase):
 
         # Test if position exists, BUY is NOT called
         self.mock_broker.place_order.reset_mock()
-        self.strategy.current_position = self.quantity # Simulate already in a long position
-        # self.mock_broker.get_positions.return_value = [{'symbol': self.symbol, 'quantity': self.quantity, 'average_price': 10.0}]
+        # self.strategy.current_position = self.quantity # This internal attribute is not used by on_bar for this check
+        self.mock_broker.get_positions.return_value = [{'symbol': self.symbol, 'quantity': self.quantity, 'average_price': 10.0}] # Mock: Position exists
         
         # Use the same MAs, but current_position is now non-zero
         # Need to re-feed the prices to update MAs correctly for this scenario, as on_bar modifies them
@@ -151,7 +153,7 @@ class TestExampleMovingAverageCrossStrategy(unittest.TestCase):
         self.strategy.short_ma_values = [10.0] * self.long_window
         self.strategy.long_ma_values =  [10.0] * self.long_window
         
-        self.strategy.on_bar(buy_trigger_candle) # Same triggering candle
+        self.strategy.on_bar({self.symbol: buy_trigger_candle}) # Pass as Dict, Same triggering candle
         self.mock_broker.place_order.assert_not_called()
 
 
@@ -173,13 +175,12 @@ class TestExampleMovingAverageCrossStrategy(unittest.TestCase):
         self.strategy.prices =          [15.0] * self.long_window
         self.strategy.short_ma_values = [15.0] * self.long_window
         self.strategy.long_ma_values =  [15.0] * self.long_window
-        self.strategy.current_position = self.quantity # In a long position
-
-        # self.mock_broker.get_positions.return_value = [{'symbol': self.symbol, 'quantity': self.quantity, 'average_price': 15.0}]
+        # self.strategy.current_position = self.quantity # This internal attribute is not used by on_bar for this check
+        self.mock_broker.get_positions.return_value = [{'symbol': self.symbol, 'quantity': self.quantity, 'average_price': 15.0}] # Mock: Position exists
 
         # Triggering candle
         sell_trigger_candle = self._create_candle(datetime(2023,1,self.long_window + 1, tzinfo=timezone.utc), 10.0)
-        self.strategy.on_bar(sell_trigger_candle)
+        self.strategy.on_bar({self.symbol: sell_trigger_candle}) # Pass as Dict
 
         self.mock_broker.place_order.assert_called_once()
         args, _ = self.mock_broker.place_order.call_args
@@ -192,15 +193,15 @@ class TestExampleMovingAverageCrossStrategy(unittest.TestCase):
 
         # Test if NO position exists, SELL is NOT called
         self.mock_broker.place_order.reset_mock()
-        self.strategy.current_position = 0 # No current position
-        # self.mock_broker.get_positions.return_value = []
+        # self.strategy.current_position = 0 # This internal attribute is not used by on_bar for this check
+        self.mock_broker.get_positions.return_value = [] # Mock: No position exists
         
         # Re-feed prices for MA calculation
         self.strategy.prices =          [15.0] * self.long_window
         self.strategy.short_ma_values = [15.0] * self.long_window
         self.strategy.long_ma_values =  [15.0] * self.long_window
 
-        self.strategy.on_bar(sell_trigger_candle) # Same triggering candle
+        self.strategy.on_bar({self.symbol: sell_trigger_candle}) # Pass as Dict, Same triggering candle
         self.mock_broker.place_order.assert_not_called()
 
 if __name__ == '__main__':

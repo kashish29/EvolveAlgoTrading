@@ -39,7 +39,10 @@ class TestHistoricalDataManager(unittest.TestCase):
         )
 
         self.mock_broker.get_historical_data.assert_called_once_with(
-            self.symbol, self.timeframe_enum, self.from_date, self.to_date
+            symbol=self.symbol, 
+            timeframe=self.timeframe_enum.value, # Broker expects string value
+            start_date=self.from_date, 
+            end_date=self.to_date
         )
         self.assertIsInstance(fetched_df, pd.DataFrame)
         self.assertEqual(len(fetched_df), 2)
@@ -99,13 +102,13 @@ class TestHistoricalDataManager(unittest.TestCase):
         })
 
         def mock_fetch_side_effect(symbol, timeframe, from_date, to_date):
-            # Simulate internal call to fetch_historical_data which uses mock_broker
+            # This mock replaces fetch_historical_data.
+            # get_all_data_sorted_by_timestamp calls fetch_historical_data with the original string timeframe.
             if symbol == 'SYM1':
-                # Ensure the timeframe passed to broker is the enum
-                self.assertEqual(timeframe, self.timeframe_enum) 
+                self.assertEqual(timeframe, self.timeframe_str) # Expect string timeframe
                 return sym1_data.copy()
             elif symbol == 'SYM2':
-                self.assertEqual(timeframe, self.timeframe_enum)
+                self.assertEqual(timeframe, self.timeframe_str) # Expect string timeframe
                 return sym2_data.copy()
             return pd.DataFrame()
 
@@ -118,9 +121,10 @@ class TestHistoricalDataManager(unittest.TestCase):
         )
         
         # Assert calls to the mocked fetch_historical_data
+        # It's called with the string timeframe by get_all_data_sorted_by_timestamp
         expected_calls = [
-            call('SYM1', self.timeframe_enum, self.from_date, self.to_date),
-            call('SYM2', self.timeframe_enum, self.from_date, self.to_date)
+            call('SYM1', self.timeframe_str, self.from_date, self.to_date),
+            call('SYM2', self.timeframe_str, self.from_date, self.to_date)
         ]
         self.data_manager.fetch_historical_data.assert_has_calls(expected_calls, any_order=True)
 
@@ -128,28 +132,28 @@ class TestHistoricalDataManager(unittest.TestCase):
         self.assertEqual(len(all_data), 3) # t1, t2, t3
 
         # Check t1
-        self.assertEqual(all_data[0]['timestamp'], t1)
-        self.assertIn('SYM1', all_data[0])
-        self.assertIn('SYM2', all_data[0])
-        self.assertIsInstance(all_data[0]['SYM1'], Candle)
-        self.assertEqual(all_data[0]['SYM1'].open, 10)
-        self.assertEqual(all_data[0]['SYM1'].timeframe, self.timeframe_enum) # Verify timeframe of Candle
-        self.assertEqual(all_data[0]['SYM2'].open, 20)
-        self.assertEqual(all_data[0]['SYM2'].timeframe, self.timeframe_enum)
+        self.assertEqual(all_data[0][0], t1) # Access timestamp as first element of tuple
+        self.assertIn('SYM1', all_data[0][1]) # Access symbol dict as second element
+        self.assertIn('SYM2', all_data[0][1])
+        self.assertIsInstance(all_data[0][1]['SYM1'], Candle)
+        self.assertEqual(all_data[0][1]['SYM1'].open, 10)
+        self.assertEqual(all_data[0][1]['SYM1'].timeframe, self.timeframe_enum) # Verify timeframe of Candle
+        self.assertEqual(all_data[0][1]['SYM2'].open, 20)
+        self.assertEqual(all_data[0][1]['SYM2'].timeframe, self.timeframe_enum)
 
         # Check t2
-        self.assertEqual(all_data[1]['timestamp'], t2)
-        self.assertIn('SYM1', all_data[1])
-        self.assertNotIn('SYM2', all_data[1])
-        self.assertEqual(all_data[1]['SYM1'].close, 12)
-        self.assertEqual(all_data[1]['SYM1'].timeframe, self.timeframe_enum)
+        self.assertEqual(all_data[1][0], t2) # Access timestamp
+        self.assertIn('SYM1', all_data[1][1]) # Access symbol dict
+        self.assertNotIn('SYM2', all_data[1][1])
+        self.assertEqual(all_data[1][1]['SYM1'].close, 12)
+        self.assertEqual(all_data[1][1]['SYM1'].timeframe, self.timeframe_enum)
 
         # Check t3
-        self.assertEqual(all_data[2]['timestamp'], t3)
-        self.assertNotIn('SYM1', all_data[2])
-        self.assertIn('SYM2', all_data[2])
-        self.assertEqual(all_data[2]['SYM2'].high, 23)
-        self.assertEqual(all_data[2]['SYM2'].timeframe, self.timeframe_enum)
+        self.assertEqual(all_data[2][0], t3) # Access timestamp
+        self.assertNotIn('SYM1', all_data[2][1]) # Access symbol dict
+        self.assertIn('SYM2', all_data[2][1])
+        self.assertEqual(all_data[2][1]['SYM2'].high, 23)
+        self.assertEqual(all_data[2][1]['SYM2'].timeframe, self.timeframe_enum)
         
     def test_get_all_data_sorted_one_symbol_empty(self):
         t1 = datetime(2023, 1, 1, 10, 0, tzinfo=timezone.utc)
@@ -173,10 +177,10 @@ class TestHistoricalDataManager(unittest.TestCase):
             symbols, self.timeframe_str, self.from_date, self.to_date
         )
         self.assertEqual(len(all_data), 1)
-        self.assertEqual(all_data[0]['timestamp'], t1)
-        self.assertIn('SYM1', all_data[0])
-        self.assertNotIn('SYM2', all_data[0]) # SYM2 should be missing as it had no data
-        self.assertEqual(all_data[0]['SYM1'].open, 10)
+        self.assertEqual(all_data[0][0], t1) # Access timestamp as first element of tuple
+        self.assertIn('SYM1', all_data[0][1]) # Access symbol dict as second element
+        self.assertNotIn('SYM2', all_data[0][1]) # SYM2 should be missing as it had no data
+        self.assertEqual(all_data[0][1]['SYM1'].open, 10) # Access candle through symbol dict
 
 
 if __name__ == '__main__':
