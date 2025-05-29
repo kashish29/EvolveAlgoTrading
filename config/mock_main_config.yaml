@@ -1,0 +1,6 @@
+api_settings:
+  mock_api_key: "test_key_123"
+  mock_api_secret: "test_secret_456"
+system_settings:
+  trade_environment: "paper"
+  log_level: "INFO"
