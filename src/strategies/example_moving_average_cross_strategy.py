@@ -1,13 +1,14 @@
 import logging # Will use logger from BaseStrategy
 from .base_strategy import BaseStrategy
 from src.core.models import Order, OrderType, OrderSide, Candle # type: ignore
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Dict, List, Optional
+import uuid
 
 if TYPE_CHECKING: # pragma: no cover
     from src.broker_api.base_broker_client import BaseBrokerClient # type: ignore
 
 class ExampleMovingAverageCrossStrategy(BaseStrategy):
-    def __init__(self, strategy_id: str, broker: 'BaseBrokerClient', config: dict = None):
+    def __init__(self, strategy_id: str, broker: 'BaseBrokerClient', config: Optional[dict] = None):
         super().__init__(strategy_id, broker, config)
         
         self.symbol = self.config.get("symbol", "DEFAULT_SYMBOL") # e.g., "SBIN-EQ"
@@ -77,7 +78,7 @@ class ExampleMovingAverageCrossStrategy(BaseStrategy):
             current_pos_qty = active_position.get('quantity', 0) if active_position else 0
             if current_pos_qty == 0: # Only buy if not already holding a position
                 order = Order(
-                    id=None, # Broker will assign ID
+                    id=str(uuid.uuid4()),
                     symbol=self.symbol,
                     quantity=self.quantity,
                     side=OrderSide.BUY,
@@ -96,7 +97,7 @@ class ExampleMovingAverageCrossStrategy(BaseStrategy):
             current_pos_qty = active_position.get('quantity', 0) if active_position else 0
             if current_pos_qty > 0: # Only sell if holding a long position
                 order = Order(
-                    id=None,
+                    id=str(uuid.uuid4()),
                     symbol=self.symbol,
                     quantity=abs(current_pos_qty), # Sell the existing quantity
                     side=OrderSide.SELL,

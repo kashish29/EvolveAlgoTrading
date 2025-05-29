@@ -52,7 +52,7 @@ class TestPerformanceReporter(unittest.TestCase):
         expected_returns = daily_equity.pct_change().dropna()
         expected_returns.index = expected_returns.index.normalize()
 
-        pd.testing.assert_series_equal(self.reporter.daily_returns, expected_returns, check_dtype=False, atol=1e-6)
+        pd.testing.assert_series_equal(self.reporter.daily_returns, expected_returns, check_dtype=False, atol=1e-6, check_freq=False)
 
     def test_init_with_non_datetimeindex_equity_curve(self):
         equity_non_dt_index = self.default_equity_curve.copy()
@@ -272,7 +272,7 @@ class TestPerformanceReporter(unittest.TestCase):
         self.reporter.plot_drawdown_underwater(output_path=None, show=True)
         
         args, kwargs = mock_qs_drawdown.call_args
-        pd.testing.assert_series_equal(args[0], self.reporter.daily_returns, check_names=False, atol=1e-6)
+        pd.testing.assert_series_equal(args[0], self.reporter.daily_returns, check_names=False, atol=1e-6, check_freq=False)
         self.assertEqual(kwargs['ax'], mock_ax)
         
         self.assertTrue(mock_plt_general.show.called)

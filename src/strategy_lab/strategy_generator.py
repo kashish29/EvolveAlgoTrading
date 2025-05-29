@@ -191,10 +191,17 @@ if __name__ == '__main__':
 
     # 5. Run evolution
     print("Running evolution...")
-    best_code, best_fitness = strategy_gen.run_evolution()
+    best_code: Optional[str]
+    raw_best_fitness: Optional[Dict[str, Any]]
+    evolution_result = strategy_gen.run_evolution()
+    if evolution_result is not None:
+        best_code, raw_best_fitness = evolution_result
+    else:
+        best_code, raw_best_fitness = None, None
+    best_fitness: Dict[str, Any] = raw_best_fitness if raw_best_fitness is not None else {}
 
     # 6. Print results
-    if best_code and best_fitness:
+    if best_code and best_fitness is not None:
         print("\n--- Evolution Complete ---")
         print(f"Best Strategy Fitness ({evo_engine.primary_fitness_metric}): {best_fitness.get(evo_engine.primary_fitness_metric, 'N/A')}")
         print("Best Strategy Metrics:")

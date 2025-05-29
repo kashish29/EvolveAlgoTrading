@@ -1,9 +1,9 @@
-import datetime
 import logging
 import os
 import pandas as pd
 import random  # For dummy data generation
 from datetime import datetime, timedelta
+import uuid
 
 # Assuming project structure src/data, src/core, etc.
 # Adjusted import path for HistoricalDataManager
@@ -24,7 +24,7 @@ from src.strategy_lab.fitness_evaluator import FitnessEvaluator
 from src.strategy_lab.evolutionary_engine import EvolutionaryEngine, DEFAULT_STRATEGY_TEMPLATE
 from src.strategy_lab.llm_interface import MockLLMInterface
 from src.strategy_lab.strategy_generator import StrategyGenerator
-
+from typing import List, Dict, Any,Optional
 # Basic Logging Configuration
 logging.basicConfig(
     level=logging.INFO,
@@ -164,14 +164,14 @@ def run_strategy_lab_demo():
 
 # --- Demo Strategy for Live Simulation ---
 class DemoSignalStrategy(BaseStrategy):
-    def __init__(self, strategy_id: str, broker: 'BaseBrokerClient', config: dict = None, signal_processor: 'SignalProcessor' = None):
+    def __init__(self, strategy_id: str, broker: 'BaseBrokerClient', config: Optional[dict[Any, Any]] = None, signal_processor: Optional['SignalProcessor'] = None):
         super().__init__(strategy_id, broker, config)
         self.signal_processor = signal_processor
         self.bars_processed = 0
         self.logger.info(f"DemoSignalStrategy '{strategy_id}' initialized. SignalProcessor: {'YES' if signal_processor else 'NO'}")
 
     # EventHandler passes broker_client, so signature should match
-    def on_bar(self, current_bars: Dict[str, 'Candle'], broker_client: 'BaseBrokerClient'):
+    def on_bar(self, current_bars: Dict[str, 'Candle']):
         self.bars_processed += 1
         current_bar_key = list(current_bars.keys())[0] # Assuming single symbol for demo
         current_bar = current_bars[current_bar_key]
@@ -213,9 +213,9 @@ class DemoSignalStrategy(BaseStrategy):
     # Helper to convert signal to order if strategy needs to fallback (not used if signal_processor is primary)
     def create_order_from_signal(self, signal: Signal) -> Order:
         return Order(
-            # id=None, # Broker will assign - Order does not take id in constructor
+            id=str(uuid.uuid4()), # Generate a unique ID for the order
             symbol=signal.symbol,
-            quantity=int(signal.quantity), # Ensure quantity is int
+            quantity=int(signal.quantity) if signal.quantity is not None else 0, # Ensure quantity is int, handle None
             side=signal.side,
             order_type=signal.order_type,
             price=signal.price, # Will be None for MARKET
@@ -392,7 +392,7 @@ if __name__ == "__main__":
             low=open_price - 2.0, close=close_price, volume=10000 + days_generated * 100,
             timeframe=data_timeframe
         ))
-        current_date += datetime.timedelta(days=1)
+        current_date += timedelta(days=1)
         days_generated += 1
 
     if not sample_candles:
@@ -402,12 +402,10 @@ if __name__ == "__main__":
     data_feeds = {symbol: sample_candles}
     logger.info(f"Generated {len(sample_candles)} sample candles for {symbol}.")
 
-    hdm = HistoricalDataManager()
-    hdm.load_data(data_feeds)  
-
     broker = MockFyersClient(
-        historical_data=hdm, initial_cash=initial_cash, commission_rate=commission_rate_broker
+        historical_data=data_feeds, initial_cash=initial_cash, commission_rate=commission_rate_broker
     )
+    hdm = HistoricalDataManager(broker_client=broker)
     broker.connect()  
 
     strategy_config = {
@@ -422,11 +420,11 @@ if __name__ == "__main__":
         strategy=strategy,
         broker=broker,
         historical_data_manager=hdm,
-        symbols=[symbol], # Corrected from symbols_to_trade to symbols
-        timeframe=data_timeframe.value, 
+        symbols=[symbol],
+        timeframe=data_timeframe.value,
         start_date=start_date,
         end_date=end_date,
-        generate_analytics_report=True # Explicitly set for clarity
+        generate_analytics_report=True
     )
 
     logger.info("Starting backtest engine...")
@@ -443,9 +441,9 @@ if __name__ == "__main__":
     if trade_log:
         for trade in trade_log:
             trade_info = (
-                f"TradeID: {trade.get('trade_id')}, OrderID: {trade.get('order_id')}, Symbol: {trade.get('symbol')}, "
-                f"Side: {trade.get('side')}, Qty: {trade.get('quantity')}, Price: {trade.get('price', 0.0):.2f}, "
-                f"Comm: {trade.get('commission', 0.0):.2f}, TS: {trade.get('timestamp')}"
+                f"TradeID: {trade.trade_id}, OrderID: {trade.order_id}, Symbol: {trade.symbol}, "
+                f"Side: {trade.side.value}, Qty: {trade.quantity}, Price: {trade.price:.2f}, "
+                f"Comm: {trade.commission:.2f}, TS: {trade.timestamp}"
             )
             logger.info(f"  {trade_info}")
     else:
@@ -494,12 +492,67 @@ if __name__ == "__main__":
         days_generated_bt +=1
     if not sample_candles_backtest: logger.error("No sample candles for backtest. Exiting."); exit()
     data_feeds_backtest = {symbol: sample_candles_backtest}
-    hdm_backtest = HistoricalDataManager(); hdm_backtest.load_data(data_feeds_backtest)
-    broker_backtest = MockFyersClient(historical_data=hdm_backtest, initial_cash=initial_cash_backtest, commission_rate=commission_rate_broker_backtest)
+    broker_backtest = MockFyersClient(historical_data=data_feeds_backtest, initial_cash=initial_cash_backtest, commission_rate=commission_rate_broker_backtest)
+    hdm_backtest = HistoricalDataManager(broker_client=broker_backtest)
     broker_backtest.connect()
     strategy_config_backtest = {"symbol": symbol, "short_window": 5, "long_window": 10, "quantity": 10, "timeframe": data_timeframe_backtest}
+    strategy_backtest = ExampleMovingAverageCrossStrategy(
+        strategy_id="MA_Cross_Backtest", broker=broker_backtest, config=strategy_config_backtest
+    )
+
+    engine_backtest = BacktesterEngine(
+        strategy=strategy_backtest,
+        broker=broker_backtest,
+        historical_data_manager=hdm_backtest,
+        symbols=[symbol],
+        timeframe=data_timeframe_backtest.value,
+        start_date=start_date,
+        end_date=end_date,
+        generate_analytics_report=True
+    )
+
+    logger.info("Starting backtest engine (from main.py __name__ == __main__ block)...")
+    equity_curve_backtest, portfolio_history_backtest = engine_backtest.run()
+    logger.info("Backtest engine finished (from main.py __name__ == __main__ block).")
+
+    if equity_curve_backtest:
+        logger.info(f"Final Portfolio Value (Backtest): {equity_curve_backtest[-1]:.2f}")
+    else:
+        logger.info(f"Final Portfolio Value (Backtest, no trades or activity): {initial_cash_backtest:.2f}")
+
+    logger.info("Trade Log (Backtest):")
+    trade_log_backtest = broker_backtest.get_trade_history()
+    if trade_log_backtest:
+        for trade in trade_log_backtest:
+            trade_info = (
+                f"TradeID: {trade.trade_id}, OrderID: {trade.order_id}, Symbol: {trade.symbol}, "
+                f"Side: {trade.side.value}, Qty: {trade.quantity}, Price: {trade.price:.2f}, "
+                f"Comm: {trade.commission:.2f}, TS: {trade.timestamp}"
+            )
+            logger.info(f"  {trade_info}")
+    else:
+        logger.info("  No trades executed (Backtest).")
+
+    logger.info("Portfolio History Snapshots (Backtest, last 5):")
+    for snapshot in portfolio_history_backtest[-5:]:
+        snap_info = (
+            f"TS: {snapshot.get('timestamp')}, Cash: {snapshot.get('cash', 0.0):.2f}, "
+            f"PositionsVal: {snapshot.get('positions_market_value', 0.0):.2f}, TotalVal: {snapshot.get('total_value', 0.0):.2f}"
+        )
+        logger.info(f"  {snap_info}")
+        for sym, pos_details in snapshot.get('positions', {}).items():
+            logger.info(f"    {sym}: Qty={pos_details.get('qty')}, AvgP={pos_details.get('avg_price', 0.0):.2f}, LastP={pos_details.get('last_price', 0.0):.2f}, MktVal={pos_details.get('market_value', 0.0):.2f}")
+
+    broker_backtest.disconnect()
+    logger.info("Backtester Demo Finished.\n" + "=" * 50 + "\n")
+
+    # --- Run Strategy Lab Demo ---
+    run_strategy_lab_demo()
+
+    # --- Run Live Simulation Demo ---
+    run_live_simulation_demo()
     strategy_backtest = ExampleMovingAverageCrossStrategy(strategy_id="MA_Cross_Backtest_1", broker=broker_backtest, config=strategy_config_backtest)
-    engine_backtest = BacktesterEngine(strategy=strategy_backtest, broker=broker_backtest, historical_data_manager=hdm_backtest, symbols_to_trade=[symbol], timeframe=data_timeframe_backtest.value, start_date=start_date, end_date=end_date)
+    engine_backtest = BacktesterEngine(strategy=strategy_backtest, broker=broker_backtest, historical_data_manager=hdm_backtest, symbols=[symbol], timeframe=data_timeframe_backtest.value, start_date=start_date, end_date=end_date, generate_analytics_report=True)
     logger.info("Starting backtest engine (main demo)...")
     equity_curve_backtest, portfolio_history_backtest = engine_backtest.run()
     logger.info("Backtest engine (main demo) finished.")

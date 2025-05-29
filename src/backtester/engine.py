@@ -1,22 +1,21 @@
 import datetime
 import pandas as pd # Added import
-from src.core.models import Candle 
+from typing import List, Dict, Any, Optional # Added import
+from src.core.models import Candle
+from src.strategies.base_strategy import BaseStrategy
 from src.data_handler.historical_data_manager import HistoricalDataManager
 from src.analytics.performance_reporter import PerformanceReporter # Added import
 
 # Placeholder for actual strategy
-class BaseStrategy: # pragma: no cover
-    def on_bar(self, current_bar_data: dict, broker_interface):
-        raise NotImplementedError
 
 class BacktesterEngine:
-    def __init__(self, 
-                 strategy: BaseStrategy, 
-                 broker, 
+    def __init__(self,
+                 strategy: BaseStrategy,
+                 broker,
                  historical_data_manager: HistoricalDataManager,
-                 symbols: list[str], 
-                 timeframe: str, 
-                 start_date: datetime.datetime, 
+                 symbols: list[str],
+                 timeframe: str,
+                 start_date: datetime.datetime,
                  end_date: datetime.datetime,
                  generate_analytics_report: bool = True): # Added parameter
         
@@ -29,8 +28,8 @@ class BacktesterEngine:
         self.end_date = end_date
         self.generate_analytics_report = generate_analytics_report # Store parameter
         
-        self.equity_curve = [] # This seems to store only values, not timestamps. Will use portfolio_history
-        self.portfolio_history = []
+        self.equity_curve: List[float] = []
+        self.portfolio_history: List[Dict[str, Any]] = []
 
     def _convert_trades_to_dataframe(self, trade_objects: list) -> pd.DataFrame:
         """

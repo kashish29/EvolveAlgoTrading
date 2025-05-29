@@ -1,14 +1,23 @@
 import pandas as pd
 from datetime import datetime
-from typing import Optional, Any
+from typing import Optional, Any, Type
 from collections import defaultdict # Added import
 from src.core.models import Candle, Timeframe  # Added import
 # Attempt to import the mock client, handling potential import errors gracefully for standalone use/testing.
+class _MockFyersClientPlaceholder: # Define a placeholder class
+    def __init__(self, *args, **kwargs): pass
+    def connect(self): return False
+    def get_historical_data(self, *args, **kwargs): return None
+
+_ActualMockFyersClientClass: Type[Any] = _MockFyersClientPlaceholder # Initialize with placeholder
+
 try:
     from src.broker_api.fyers_client import MockFyersClient
+    _ActualMockFyersClientClass = MockFyersClient # Assign the actual class if import succeeds
 except ImportError:
-    print("Warning: MockFyersClient not found at its expected location. Ensure PYTHONPATH is set correctly or full framework is used.")
-    MockFyersClient = None # Define it as None if import fails
+    print("Warning: MockFyersClient not found at its expected location. Using a placeholder.")
+
+MockFyersClientInstance = Optional[Any] # Define a type alias for MockFyersClient instance or None
 
 
 class HistoricalDataManager:
@@ -108,7 +117,7 @@ class HistoricalDataManager:
                 - A dictionary where keys are symbol strings and values are Candle objects for that timestamp.
               The list is sorted by timestamp in ascending order.
         """
-        all_candles_by_timestamp = defaultdict(dict)
+        all_candles_by_timestamp: defaultdict[datetime, dict[str, Candle]] = defaultdict(dict)
         
         # Convert timeframe string to Timeframe enum
         try:
@@ -181,8 +190,10 @@ if __name__ == '__main__':
     # or placing a copy of fyers_client.py (or a simplified version) in the same directory for this test.
     
     # Simplified MockFyersClient for direct script execution if full import fails
-    class StandaloneMockFyersClient:
-        def __init__(self, client_id, token, **kwargs): self.is_connected = False; print("StandaloneMockFyersClient used.") # Corrected attribute name
+    class StandaloneMockFyersClient(_ActualMockFyersClientClass): # Inherit from the actual mock client class or placeholder
+        def __init__(self, client_id, token, **kwargs):
+            super().__init__(client_id, token, **kwargs) # Call parent constructor
+            self.is_connected = False; print("StandaloneMockFyersClient used.") # Corrected attribute name
         def connect(self): self.is_connected = True; print("StandaloneMock connected."); return True # Corrected attribute name
         def get_historical_data(self, symbol, timeframe, start_date, end_date):
             if not self.is_connected: return None # Corrected attribute name
@@ -200,24 +211,26 @@ if __name__ == '__main__':
                 'timeframe': timeframe
             })
 
-    client_to_use = None
-    if MockFyersClient:
+    client_to_use: MockFyersClientInstance = None
+    if _ActualMockFyersClientClass is not _MockFyersClientPlaceholder:
         try:
-            client_to_use = MockFyersClient(client_id="test_hd_client", token="test_hd_token")
+            client_to_use = _ActualMockFyersClientClass(client_id="test_hd_client", token="test_hd_token")
             # Attempt to connect the full client if it initializes
-            if hasattr(client_to_use, 'connect'):
+            if client_to_use and hasattr(client_to_use, 'connect'):
                  client_to_use.connect()
         except Exception as e:
             print(f"Could not instantiate or connect full MockFyersClient: {e}. Falling back to standalone mock.")
             client_to_use = StandaloneMockFyersClient(client_id="test_hd_client", token="test_hd_token")
-            client_to_use.connect() # Connect the standalone mock
+            if client_to_use: # Ensure client_to_use is not None before connecting
+                client_to_use.connect() # Connect the standalone mock
     else:
         client_to_use = StandaloneMockFyersClient(client_id="test_hd_client", token="test_hd_token")
-        client_to_use.connect() # Connect the standalone mock
+        if client_to_use: # Ensure client_to_use is not None before connecting
+            client_to_use.connect() # Connect the standalone mock
 
     # Check connection status consistently
     connected_successfully = False
-    if hasattr(client_to_use, 'is_connected') and client_to_use.is_connected:
+    if client_to_use and hasattr(client_to_use, 'is_connected') and client_to_use.is_connected:
         connected_successfully = True
     
     if connected_successfully:

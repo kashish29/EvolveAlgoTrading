@@ -1,11 +1,12 @@
 import logging
-from typing import TYPE_CHECKING, Optional, Dict
+from typing import Optional, Dict
+from datetime import datetime # Added for timestamp in Signal calls
+from unittest.mock import MagicMock # Added for MockExecutionHandler
 
 from src.core.models import Signal
-
-if TYPE_CHECKING:
-    from src.live_trader.execution_handler import ExecutionHandler # Assuming this is the path
-    # from src.risk_management.base_risk_manager import BaseRiskManager # Placeholder for future RiskManager base class
+from src.core.enums import OrderSide
+from src.live_trader.execution_handler import ExecutionHandler # Moved out of TYPE_CHECKING
+from src.broker_api.base_broker_client import BaseBrokerClient # Added for MockExecutionHandler
 
 class SignalProcessor:
     def __init__(self, execution_handler: 'ExecutionHandler', risk_manager=None):
@@ -96,14 +97,14 @@ if __name__ == '__main__':
     # Using the actual Signal class from src.core.models for type consistency
     # from src.core.models import Signal # Already imported at the top
 
-    class MockExecutionHandler:
-        def __init__(self):
-            self.logger = logging.getLogger(self.__class__.__name__)
-            self.executed_signals = []
-            if not self.logger.handlers:
-                logging.basicConfig(level=logging.DEBUG) # Ensure logger is configured for mock
+    class MockExecutionHandler(ExecutionHandler): # Inherit from ExecutionHandler
+        def __init__(self, broker_client: Optional[BaseBrokerClient] = None):
+            # Pass a mock broker client to the parent constructor
+            super().__init__(broker_client if broker_client else MagicMock(spec=BaseBrokerClient))
+            self.executed_signals: list[Signal] = [] # Keep this for testing purposes
 
         def execute_signal(self, signal: Signal):
+            # This method overrides the parent's execute_signal for testing purposes
             self.logger.info(f"MockExecutionHandler: Executing signal: {signal}")
             self.executed_signals.append(signal)
 
@@ -130,11 +131,11 @@ if __name__ == '__main__':
     mock_exec_handler_approve = MockExecutionHandler()
     mock_risk_manager_approve = MockRiskManager(approval_mode=True)
     signal_processor_approve = SignalProcessor(
-        execution_handler=mock_exec_handler_approve, 
+        execution_handler=mock_exec_handler_approve,
         risk_manager=mock_risk_manager_approve
     )
     
-    test_signal_1 = Signal(symbol="AAPL", action="BUY", quantity=100, signal_type="ENTRY", details={"price_target": 155.0})
+    test_signal_1 = Signal(timestamp=datetime.now(), symbol="AAPL", side=OrderSide.BUY, quantity=100, comment="ENTRY with price target 155.0")
     print(f"\n--- Testing Scenario 1: Signal with Approving RiskManager ---")
     signal_processor_approve.process_signal(test_signal_1, current_portfolio_state={"cash": 50000})
     assert len(mock_exec_handler_approve.executed_signals) == 1, "Scenario 1 failed: Signal not executed"
@@ -145,11 +146,11 @@ if __name__ == '__main__':
     mock_exec_handler_reject = MockExecutionHandler()
     mock_risk_manager_reject = MockRiskManager(approval_mode=False)
     signal_processor_reject = SignalProcessor(
-        execution_handler=mock_exec_handler_reject, 
+        execution_handler=mock_exec_handler_reject,
         risk_manager=mock_risk_manager_reject
     )
     
-    test_signal_2 = Signal(symbol="GOOG", action="SELL", quantity=50, signal_type="EXIT", details={"reason": "stop_loss"})
+    test_signal_2 = Signal(timestamp=datetime.now(), symbol="GOOG", side=OrderSide.SELL, quantity=50, comment="EXIT due to stop_loss")
     print(f"\n--- Testing Scenario 2: Signal with Rejecting RiskManager ---")
     signal_processor_reject.process_signal(test_signal_2, current_portfolio_state={"cash": 50000, "positions": {"GOOG": 60}})
     assert len(mock_exec_handler_reject.executed_signals) == 0, "Scenario 2 failed: Signal was executed despite rejection"
@@ -160,7 +161,7 @@ if __name__ == '__main__':
     mock_exec_handler_no_rm = MockExecutionHandler()
     signal_processor_no_rm = SignalProcessor(execution_handler=mock_exec_handler_no_rm, risk_manager=None)
     
-    test_signal_3 = Signal(symbol="MSFT", action="BUY", quantity=75, signal_type="ENTRY")
+    test_signal_3 = Signal(timestamp=datetime.now(), symbol="MSFT", side=OrderSide.BUY, quantity=75, comment="ENTRY")
     print(f"\n--- Testing Scenario 3: Signal without RiskManager ---")
     signal_processor_no_rm.process_signal(test_signal_3)
     assert len(mock_exec_handler_no_rm.executed_signals) == 1, "Scenario 3 failed: Signal not executed"
@@ -170,10 +171,10 @@ if __name__ == '__main__':
     mock_exec_handler_bad_rm = MockExecutionHandler()
     class BadRiskManagerNoMethod: pass # Does not have validate_trade
     signal_processor_bad_rm = SignalProcessor(
-        execution_handler=mock_exec_handler_bad_rm, 
+        execution_handler=mock_exec_handler_bad_rm,
         risk_manager=BadRiskManagerNoMethod()
     )
-    test_signal_4 = Signal(symbol="TSLA", action="BUY", quantity=10, signal_type="ENTRY")
+    test_signal_4 = Signal(timestamp=datetime.now(), symbol="TSLA", side=OrderSide.BUY, quantity=10, comment="ENTRY")
     print(f"\n--- Testing Scenario 4: Signal with RiskManager missing validate_trade ---")
     signal_processor_bad_rm.process_signal(test_signal_4)
     # Signal should still be processed as the risk check is skipped with a warning
@@ -181,12 +182,15 @@ if __name__ == '__main__':
     print(f"Execution Handler executed signals: {len(mock_exec_handler_bad_rm.executed_signals)}")
 
     # Scenario 5: SignalProcessor with ExecutionHandler missing 'execute_signal'
-    class BadExecutionHandlerNoMethod: pass # Does not have execute_signal
+    class BadExecutionHandlerNoMethod(ExecutionHandler): # Inherit from ExecutionHandler
+        def __init__(self, broker_client: Optional[BaseBrokerClient] = None):
+            super().__init__(broker_client if broker_client else MagicMock(spec=BaseBrokerClient))
+        # Intentionally do NOT implement execute_signal to test the error path
     signal_processor_bad_eh = SignalProcessor(
-        execution_handler=BadExecutionHandlerNoMethod(), 
+        execution_handler=BadExecutionHandlerNoMethod(),
         risk_manager=None
     )
-    test_signal_5 = Signal(symbol="AMZN", action="SELL", quantity=20, signal_type="EXIT")
+    test_signal_5 = Signal(timestamp=datetime.now(), symbol="AMZN", side=OrderSide.SELL, quantity=20, comment="EXIT")
     print(f"\n--- Testing Scenario 5: Signal with ExecutionHandler missing execute_signal ---")
     signal_processor_bad_eh.process_signal(test_signal_5)
     # No signals would be "executed" by the bad handler. The code logs an error.

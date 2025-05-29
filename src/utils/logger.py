@@ -1,5 +1,6 @@
 import logging
 import sys
+from typing import Optional
 
 DEFAULT_LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 DEFAULT_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
@@ -9,7 +10,7 @@ def get_logger(name: str,
                log_format: str = DEFAULT_LOG_FORMAT,
                date_format: str = DEFAULT_DATE_FORMAT,
                log_to_console: bool = True,
-               log_file: str = None):
+               log_file: Optional[str] = None):
     """
     Configures and returns a logger instance.
 

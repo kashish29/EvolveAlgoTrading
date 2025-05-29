@@ -1,13 +1,13 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, Optional
 
 if TYPE_CHECKING: # pragma: no cover
     from src.broker_api.base_broker_client import BaseBrokerClient # type: ignore
     from src.core.models import Candle, Order, Trade # type: ignore
 
 class BaseStrategy(ABC):
-    def __init__(self, strategy_id: str, broker: 'BaseBrokerClient', config: dict = None):
+    def __init__(self, strategy_id: str, broker: 'BaseBrokerClient', config: Optional[dict] = None):
         self.strategy_id = strategy_id
         self.broker = broker # Instance of a class implementing BaseBrokerClient
         self.config = config or {}

@@ -1,13 +1,14 @@
 import pandas as pd
-import quantstats
+import quantstats # type: ignore
 import matplotlib.pyplot as plt
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 import numpy as np # Import numpy for np.random used in example
 
 class PerformanceReporter:
-    def __init__(self, trades: pd.DataFrame, equity_curve: pd.Series, benchmark_returns: pd.Series = None, config: dict = None):
+    def __init__(self, trades: pd.DataFrame, equity_curve: pd.Series, benchmark_returns: Optional[pd.Series] = None, config: Optional[dict] = None):
         self.trades = trades
         self.equity_curve = equity_curve 
         self.benchmark_returns = benchmark_returns # Expected to be daily percentage returns
@@ -45,11 +46,15 @@ class PerformanceReporter:
         daily_returns = daily_equity.pct_change().dropna()
         
         # Ensure the index is just date for quantstats compatibility
-        daily_returns.index = daily_returns.index.normalize() 
+        # Ensure the index is just date for quantstats compatibility
+        # Explicitly cast to DatetimeIndex to satisfy mypy, though resample already returns DatetimeIndex
+        daily_returns.index = pd.DatetimeIndex(daily_returns.index).floor('D')
         
         return daily_returns
 
-    def generate_quantstats_report(self, output_path: str = "report.html", title: str = "Strategy Performance"):
+    def generate_quantstats_report(self, output_path: Optional[str] = "report.html", title: str = "Strategy Performance"):
+        if output_path is None:
+            output_path = "report.html" # Default if None is passed
         if self.daily_returns.empty:
             logger.warning("PerformanceReporter: Daily returns are empty. Cannot generate QuantStats report.")
             return
@@ -149,7 +154,7 @@ class PerformanceReporter:
             
         return metrics
 
-    def plot_equity_curve(self, output_path: str = None, show: bool = True):
+    def plot_equity_curve(self, output_path: Optional[str] = None, show: bool = True):
         logger.info(f"plot_equity_curve called with output_path='{output_path}', show={show}")
         if self.equity_curve is None or self.equity_curve.empty:
             logger.warning("PerformanceReporter: Equity curve is empty. Cannot plot.")
@@ -256,8 +261,10 @@ class PerformanceReporter:
         plt.close(fig) # Close the plot to free memory
         logger.info("PerformanceReporter: Equity curve plot figure closed.")
 
-    def plot_drawdown_underwater(self, output_path: str = None, show: bool = True):
+    def plot_drawdown_underwater(self, output_path: Optional[str] = None, show: bool = True):
         logger.info(f"plot_drawdown_underwater called with output_path='{output_path}', show={show}")
+        if output_path is None:
+            output_path = "drawdown_underwater_plot.png" # Default if None is passed
         if self.daily_returns.empty:
             logger.warning("PerformanceReporter: Daily returns are empty. Cannot plot drawdown.")
             return
@@ -297,11 +304,11 @@ if __name__ == '__main__':
     np.random.seed(123) # For reproducibility of random numbers
     idx = pd.date_range(start='2023-01-01', end='2023-01-31', freq='D')
     
-    initial_equity_value = 100000
+    initial_equity_value = 100000.0 # Changed to float
     equity_values_list = [initial_equity_value]
     for i in range(1, len(idx)):
         change = np.random.normal(loc=50, scale=300) # Simulate daily P&L
-        equity_values_list.append(equity_values_list[-1] + change)
+        equity_values_list.append(float(equity_values_list[-1] + change)) # Ensure float
     
     equity_curve_series = pd.Series(equity_values_list, index=idx, name="Equity")
     # Add some typical characteristics to equity curve
@@ -357,7 +364,8 @@ if __name__ == '__main__':
      # Test with equity curve not having DatetimeIndex initially
     logger.info("\n--- Test with non-DatetimeIndex equity curve ---")
     equity_values_non_dt_idx = equity_curve_series.copy()
-    equity_values_non_dt_idx.index = range(len(equity_values_non_dt_idx)) # Non-datetime index
+    # Convert range to DatetimeIndex for consistency with expected types
+    equity_values_non_dt_idx.index = pd.DatetimeIndex(pd.to_datetime(pd.Series(range(len(equity_values_non_dt_idx))).astype(str)))
      
     reporter_non_dt_idx = PerformanceReporter(trades=trades_df, equity_curve=equity_values_non_dt_idx, benchmark_returns=benchmark_daily_rets)
     logger.info("Daily returns with auto-converted index:")

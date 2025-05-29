@@ -13,6 +13,22 @@ from src.core.models import Candle, Timeframe
 from src.strategies.base_strategy import BaseStrategy
 import src # Import the src package to pass to exec
 
+import logging
+import uuid
+import pandas as pd
+import datetime
+import inspect # For finding classes
+from typing import Dict, Any, Optional, List, Type
+
+from src.data_handler.historical_data_manager import HistoricalDataManager
+from src.broker_api.mock_fyers_client import MockFyersClient
+from src.backtester.engine import BacktesterEngine
+# from src.backtester.metrics import calculate_all_metrics # Replaced by PerformanceReporter
+from src.analytics.performance_reporter import PerformanceReporter # Added import
+from src.core.models import Candle, Timeframe
+from src.strategies.base_strategy import BaseStrategy as ActualBaseStrategy # Alias to avoid conflict
+import src # Import the src package to pass to exec
+
 class FitnessEvaluator:
     """
     Evaluates the fitness of a trading strategy by running it through a backtester
@@ -26,6 +42,15 @@ class FitnessEvaluator:
             config (Optional[Dict[str, Any]]): Configuration for the evaluator (e.g., backtester settings).
         """
         self.config = config or {}
+        
+        self.logger = logging.getLogger(self.__class__.__name__)
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+            self.logger.setLevel(logging.INFO) # Default level
+
         # Updated default_error_metrics to align with PerformanceReporter keys
         # Values represent "bad" outcomes for these metrics.
         self.default_error_metrics = {
@@ -60,11 +85,11 @@ class FitnessEvaluator:
         """
         if "EvolvedStrategy" in strategy_namespace and \
            isinstance(strategy_namespace["EvolvedStrategy"], type) and \
-           issubclass(strategy_namespace["EvolvedStrategy"], BaseStrategy):
+           issubclass(strategy_namespace["EvolvedStrategy"], ActualBaseStrategy):
             return strategy_namespace["EvolvedStrategy"]
 
         for name, obj in strategy_namespace.items():
-            if inspect.isclass(obj) and issubclass(obj, BaseStrategy) and obj is not BaseStrategy:
+            if inspect.isclass(obj) and issubclass(obj, ActualBaseStrategy) and obj is not ActualBaseStrategy:
                 return obj
         return None
 
@@ -102,32 +127,40 @@ class FitnessEvaluator:
         """
         Evaluates a single strategy using PerformanceReporter.
         """
+        self.logger.info("Starting strategy evaluation.")
         error_metrics_with_details = self.default_error_metrics.copy()
-        strategy_namespace = {}
-        strategy_class = None
+        strategy_namespace: Dict[str, Any] = {}
+        strategy_class: Optional[Type[BaseStrategy]] = None
         
         exec_globals = {
-            'BaseStrategy': BaseStrategy, 'src': src, '__builtins__': __builtins__
+            'BaseStrategy': ActualBaseStrategy, 'src': src, '__builtins__': __builtins__,
+            'List': List, 'Dict': Dict # Explicitly add typing generics
         }
         try:
             exec(strategy_code_string, exec_globals, strategy_namespace)
-            strategy_class = self._find_strategy_class(strategy_namespace) 
+            self.logger.info("Strategy code executed successfully.")
+            strategy_class = self._find_strategy_class(strategy_namespace)
             if strategy_class is None:
+                self.logger.warning("No 'EvolvedStrategy' or BaseStrategy subclass found in strategy code.")
                 error_metrics_with_details["error"] = "No 'EvolvedStrategy' or BaseStrategy subclass found in strategy code."
                 return error_metrics_with_details
         except Exception as e:
+            self.logger.error(f"Error executing strategy code: {str(e)}", exc_info=True)
             error_metrics_with_details["error"] = f"Error executing strategy code: {str(e)}"
             return error_metrics_with_details
 
         candles_list: List[Candle] = []
-        symbol = strategy_config.get("symbol", "UNKNOWN_SYMBOL") 
+        symbol = strategy_config.get("symbol", "UNKNOWN_SYMBOL")
         try:
             df = pd.read_csv(historical_data_path)
+            self.logger.info(f"Historical data loaded from {historical_data_path}.")
             if df.empty:
+                self.logger.warning("Historical data CSV is empty.")
                 error_metrics_with_details["error"] = "Historical data CSV is empty."
                 return error_metrics_with_details
             required_cols = {'timestamp', 'open', 'high', 'low', 'close', 'volume'}
             if not required_cols.issubset(df.columns):
+                self.logger.warning(f"Historical data CSV missing required columns: {required_cols - set(df.columns)}")
                 error_metrics_with_details["error"] = f"Historical data CSV missing required columns: {required_cols - set(df.columns)}"
                 return error_metrics_with_details
             df['timestamp'] = pd.to_datetime(df['timestamp'])
@@ -137,14 +170,17 @@ class FitnessEvaluator:
                     low=row['low'], close=row['close'], volume=row['volume'], symbol=symbol
                 ))
             if not candles_list:
+                self.logger.warning("No candles processed from historical data.")
                 error_metrics_with_details["error"] = "No candles processed from historical data."
                 return error_metrics_with_details
             start_date = candles_list[0].timestamp
             end_date = candles_list[-1].timestamp
         except FileNotFoundError:
+            self.logger.error(f"Historical data file not found: {historical_data_path}")
             error_metrics_with_details["error"] = "Historical data file not found."
             return error_metrics_with_details
         except Exception as e:
+            self.logger.error(f"Error loading or processing historical data: {str(e)}", exc_info=True)
             error_metrics_with_details["error"] = f"Error loading or processing historical data: {str(e)}"
             return error_metrics_with_details
             
@@ -169,20 +205,26 @@ class FitnessEvaluator:
                 generate_analytics_report=False # No need for engine to generate its own report here
 
             )
+            self.logger.info("Backtester components initialized.")
         except Exception as e:
+            self.logger.error(f"Error setting up backtester: {str(e)}", exc_info=True)
             error_metrics_with_details["error"] = f"Error setting up backtester: {str(e)}"
             return error_metrics_with_details
 
         try:
             _, portfolio_history = engine.run() # engine.run() returns (equity_curve_raw_values, portfolio_history)
+            self.logger.info("Backtester engine run completed.")
             trade_log = broker.get_trade_history()
             trade_df = self._convert_trades_to_dataframe(trade_log)
+            self.logger.info(f"Trades converted to DataFrame. Number of trades: {len(trade_df)}")
 
             if trade_df.empty:
+                self.logger.warning("Trade DataFrame is empty. Cannot generate analytics metrics.")
                 error_metrics_with_details["error"] = "No trades recorded. Cannot generate analytics metrics."
                 return error_metrics_with_details
 
             if not portfolio_history:
+                self.logger.warning("Portfolio history is empty. Cannot generate analytics metrics.")
                 error_metrics_with_details["error"] = "Portfolio history is empty. Cannot generate analytics metrics."
                 return error_metrics_with_details
 
@@ -192,6 +234,7 @@ class FitnessEvaluator:
             temp_df = pd.DataFrame({'timestamp': pd.to_datetime(timestamps), 'value': values})
             
             if temp_df.empty or temp_df['value'].isnull().all(): # Check if temp_df is empty or all values are null
+                self.logger.warning("Equity curve is empty or contains no valid values after processing portfolio_history.")
                 error_metrics_with_details["error"] = "Equity curve is empty or contains no valid values after processing portfolio_history."
                 return error_metrics_with_details
 
@@ -204,13 +247,18 @@ class FitnessEvaluator:
                 temp_df = temp_df.set_index('timestamp')
 
             equity_curve_series = pd.Series(temp_df['value'], name="Equity").sort_index()
+            self.logger.info(f"Equity curve series created. Length: {len(equity_curve_series)}")
 
             if equity_curve_series.empty: # Final check
+                self.logger.warning("Equity curve is empty after final processing. Cannot generate analytics metrics.")
                 error_metrics_with_details["error"] = "Equity curve is empty after final processing. Cannot generate analytics metrics."
                 return error_metrics_with_details
             
+            self.logger.info("Attempting to instantiate PerformanceReporter.")
             reporter = PerformanceReporter(trades=trade_df, equity_curve=equity_curve_series, benchmark_returns=None)
+            self.logger.info("PerformanceReporter instantiated successfully.")
             all_metrics = reporter.calculate_key_metrics()
+            self.logger.info("Key metrics calculated by PerformanceReporter.")
             
             # Ensure all default metric keys are present in the final output, even if calculation failed partially
             # PerformanceReporter.calculate_key_metrics should ideally return all keys with default/error values
@@ -222,6 +270,7 @@ class FitnessEvaluator:
             return final_metrics
             
         except Exception as e:
+            self.logger.error(f"Error during backtest execution or metrics calculation: {str(e)}", exc_info=True)
             error_metrics_with_details["error"] = f"Error during backtest execution or metrics calculation: {str(e)}"
             # Log the full traceback for debugging if a logger was available
             # import traceback
@@ -249,7 +298,7 @@ from src.core.models import Order, OrderType, OrderSide
 class EvolvedStrategy(BaseStrategy):
     def __init__(self, strategy_id, broker, config):
         super().__init__(strategy_id, broker, config)
-        self.symbol = self.config.get("symbol", "MOCK_SYMBOL")
+        self.symbol = self.config.get("symbol", "TEST_SYMBOL_MINIMAL")
         self.bought = False
         # Access logger via self.logger if BaseStrategy provides it
         # For example: self.logger.info("EvolvedStrategy initialized")

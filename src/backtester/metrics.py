@@ -194,25 +194,26 @@ if __name__ == '__main__': # pragma: no cover
     # Example Usage
     print("Running example metrics calculations...")
     
+
     # Sample Equity Curve (e.g., daily portfolio values)
-    sample_equity_curve = [
-        100000, 101000, 100500, 102000, 101500, 103000, 102500, 104000, 103500, 105000, # 10 days
-        104500, 106000, 105500, 107000, 106500, 108000, 107500, 109000, 108500, 110000  # 20 days
+    sample_equity_curve: List[float] = [
+        100000.0, 101000.0, 100500.0, 102000.0, 101500.0, 103000.0, 102500.0, 104000.0, 103500.0, 105000.0, # 10 days
+        104500.0, 106000.0, 105500.0, 107000.0, 106500.0, 108000.0, 107500.0, 109000.0, 108500.0, 110000.0  # 20 days
     ]
     # More volatile curve for drawdown testing
-    # sample_equity_curve = [100, 110, 105, 120, 90, 95, 80, 110]
+    # sample_equity_curve = [100.0, 110.0, 105.0, 120.0, 90.0, 95.0, 80.0, 110.0]
 
 
     # Sample Trade Log (list of dictionaries, each with a 'pnl' field)
-    sample_trade_log = [
-        {"trade_id": "t1", "pnl": 1500},
-        {"trade_id": "t2", "pnl": -500},
-        {"trade_id": "t3", "pnl": 2000},
-        {"trade_id": "t4", "pnl": -800},
-        {"trade_id": "t5", "pnl": 1200},
-        {"trade_id": "t6", "pnl": 300},
-        {"trade_id": "t7", "pnl": -1000},
-        {"trade_id": "t8", "pnl": 0}, # Break-even trade
+    sample_trade_log: List[Dict[str, Any]] = [
+        {"trade_id": "t1", "pnl": 1500.0},
+        {"trade_id": "t2", "pnl": -500.0},
+        {"trade_id": "t3", "pnl": 2000.0},
+        {"trade_id": "t4", "pnl": -800.0},
+        {"trade_id": "t5", "pnl": 1200.0},
+        {"trade_id": "t6", "pnl": 300.0},
+        {"trade_id": "t7", "pnl": -1000.0},
+        {"trade_id": "t8", "pnl": 0.0}, # Break-even trade
         {"trade_id": "t9"}, # Trade without PNL
     ]
     
@@ -235,7 +236,7 @@ if __name__ == '__main__': # pragma: no cover
 
     # Test with empty/minimal data
     print("\nTesting with minimal data:")
-    empty_equity = [100000]
+    empty_equity: List[float] = [100000.0]
     empty_trades: List[Dict[str, Any]] = []
     minimal_metrics = calculate_all_metrics(empty_equity, empty_trades, risk_free_annual, 1)
     for key, value in minimal_metrics.items():
@@ -245,7 +246,7 @@ if __name__ == '__main__': # pragma: no cover
             print(f"  {key}: {value}")
 
     print("\nTesting sortino with no losses:")
-    positive_returns_equity = [100, 101, 102, 103, 104, 105]
+    positive_returns_equity: List[float] = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0]
     sortino_no_loss = calculate_sortino_ratio(positive_returns_equity, 0.00)
     print(f"  Sortino with no losses (0 risk-free): {sortino_no_loss:.4f}")
     sortino_no_loss_rf = calculate_sortino_ratio(positive_returns_equity, 0.02) # rf higher than some returns
@@ -253,7 +254,7 @@ if __name__ == '__main__': # pragma: no cover
 
 
     print("\nTesting sharpe with no std dev:")
-    flat_returns_equity = [100, 100, 100, 100] # no change
+    flat_returns_equity: List[float] = [100.0, 100.0, 100.0, 100.0] # no change
     sharpe_no_std = calculate_sharpe_ratio(flat_returns_equity, 0.00)
     print(f"  Sharpe with 0 std dev, 0 mean excess return: {sharpe_no_std:.4f}")
     
@@ -262,7 +263,7 @@ if __name__ == '__main__': # pragma: no cover
     # Example: equity = [100, 101, 102.01, 103.0301] (1% daily return)
     # If rf_daily = 1%, then excess returns are all 0. std_dev_excess_return = 0, mean_excess_return = 0. Sharpe = 0.
     # If rf_daily = 0.5%, then excess returns are all 0.5%. std_dev_excess_return = 0, mean_excess_return = 0.005. Sharpe = inf.
-    const_increase_equity = [100, 101, 102.01, 103.0301] # approx 1% daily return
+    const_increase_equity: List[float] = [100.0, 101.0, 102.01, 103.0301] # approx 1% daily return
     sharpe_positive_mean_no_std = calculate_sharpe_ratio(const_increase_equity, 0.0) # rf=0
     print(f"  Sharpe with 0 std dev, positive mean excess return: {sharpe_positive_mean_no_std}") # Should be inf
     sharpe_zero_mean_no_std = calculate_sharpe_ratio(const_increase_equity, ( (1.01**252) -1) ) # rf matches daily return
@@ -271,15 +272,15 @@ if __name__ == '__main__': # pragma: no cover
 
     print("\nTesting Max Drawdown with various curves:")
     print(f"  Max DD for {sample_equity_curve[:10]}: {calculate_max_drawdown(sample_equity_curve[:10]):.4f}")
-    dd_curve_1 = [100, 110, 105, 120, 90, 95, 80, 110]
+    dd_curve_1: List[float] = [100.0, 110.0, 105.0, 120.0, 90.0, 95.0, 80.0, 110.0]
     print(f"  Max DD for {dd_curve_1}: {calculate_max_drawdown(dd_curve_1):.4f}") # Peak 120, Trough 80. DD = (120-80)/120 = 0.3333
-    dd_curve_2 = [100, 90, 80, 70, 60]
+    dd_curve_2: List[float] = [100.0, 90.0, 80.0, 70.0, 60.0]
     print(f"  Max DD for {dd_curve_2}: {calculate_max_drawdown(dd_curve_2):.4f}") # Peak 100, Trough 60. DD = (100-60)/100 = 0.4000
-    dd_curve_3 = [100, 100, 100]
+    dd_curve_3: List[float] = [100.0, 100.0, 100.0]
     print(f"  Max DD for {dd_curve_3}: {calculate_max_drawdown(dd_curve_3):.4f}") # 0.0
-    dd_curve_4 = []
+    dd_curve_4: List[float] = []
     print(f"  Max DD for empty curve {dd_curve_4}: {calculate_max_drawdown(dd_curve_4):.4f}") # 0.0
-    dd_curve_5 = [0,0,0]
+    dd_curve_5: List[float] = [0.0, 0.0, 0.0]
     print(f"  Max DD for zero curve {dd_curve_5}: {calculate_max_drawdown(dd_curve_5):.4f}") # 0.0
 
     print("\nTesting Profit Factor with edge cases:")

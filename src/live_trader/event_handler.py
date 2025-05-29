@@ -69,7 +69,7 @@ class DataFeedSimulator:
 
                 # Update broker with current bar and process orders
                 self.mock_broker.set_current_bar(event_symbol, market_data_event)
-                self.mock_broker.current_time = market_data_event.timestamp 
+                self.mock_broker.current_time = market_data_event.timestamp
                 self.mock_broker._process_pending_orders()
                 
                 order_updates = self.mock_broker.get_simulated_order_updates()
@@ -155,6 +155,7 @@ if __name__ == '__main__':
     from src.broker_api.mock_fyers_client import MockFyersClient
     from src.core.models import OrderType, OrderSide # Removed unused Trade import for main
     from datetime import datetime, timedelta # Ensure datetime is imported for timedelta
+    import uuid
 
     class MockStrategy(BaseStrategy):
         def __init__(self, strategy_id, broker, config=None):
@@ -168,18 +169,18 @@ if __name__ == '__main__':
                 if self.bars_processed == 1: # Place order only on the first bar for this symbol
                     self.logger.info(f"MockStrategy: Attempting to place a LIMIT BUY order for {symbol} at price {candle.close * 0.98}")
                     limit_order = Order(
-                        symbol=symbol, 
-                        quantity=1, 
-                        side=OrderSide.BUY, 
-                        order_type=OrderType.LIMIT, 
+                        id=str(uuid.uuid4()), # Generate a unique ID
+                        symbol=symbol,
+                        quantity=1,
+                        side=OrderSide.BUY,
+                        order_type=OrderType.LIMIT,
                         price=round(candle.close * 0.98, 2), # Rounded price
-                        timeframe=candle.timeframe # Pass timeframe if Order model expects it
                     )
                     order_id, status = self.broker.place_order(limit_order)
                     self.logger.info(f"MockStrategy: Placed LIMIT order {order_id} for {symbol} with status {status}")
                 elif self.bars_processed == 2 and symbol == "TEST_MSFT": # Example: Place another order for a different symbol
                     self.logger.info(f"MockStrategy: Attempting to place a MARKET SELL order for {symbol}")
-                    market_order = Order(symbol=symbol, quantity=2, side=OrderSide.SELL, order_type=OrderType.MARKET, timeframe=candle.timeframe)
+                    market_order = Order(id=str(uuid.uuid4()), symbol=symbol, quantity=2, side=OrderSide.SELL, order_type=OrderType.MARKET)
                     order_id, status = self.broker.place_order(market_order)
                     self.logger.info(f"MockStrategy: Placed MARKET order {order_id} for {symbol} with status {status}")
 
@@ -196,7 +197,7 @@ if __name__ == '__main__':
     for i in range(3): # 3 bars for each symbol
         dt = now - timedelta(minutes=(2-i))
         sample_data_list.append({
-            'timestamp': dt, 'symbol': 'TEST_AAPL', 'timeframe': Timeframe.ONE_MINUTE.value, # Use enum value
+            'timestamp': dt, 'symbol': 'TEST_AAPL', 'timeframe': Timeframe.MINUTE_1.value, # Use enum value
             'open': 150.0 + i*0.5, 'high': 151.0 + i*0.5, 'low': 149.5 + i*0.5, 
             'close': 150.5 + i*0.5, 'volume': 1000 + i*100
         })
@@ -224,7 +225,7 @@ if __name__ == '__main__':
     data_feed_sim = DataFeedSimulator(historical_data=historical_df, 
                                       mock_broker=mock_broker_instance,
                                       default_symbol="FALLBACK_SYM",
-                                      default_timeframe=Timeframe.ONE_MINUTE)
+                                      default_timeframe=Timeframe.MINUTE_1) # Corrected to use the enum member directly
                                       
     event_handler = EventHandler(strategy=mock_strategy_instance, 
                                  broker_client=mock_broker_instance, 

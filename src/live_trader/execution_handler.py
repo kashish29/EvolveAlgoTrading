@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, Any, Optional
+import uuid
 
 from src.core.models import Signal, Order, OrderSide
 from src.core.enums import OrderType, OrderStatus
@@ -87,15 +88,17 @@ class ExecutionHandler:
 
             # Include other details from signal if they are relevant for Order
             # Example: signal.timeframe could be order.timeframe if Order model has it
-            if hasattr(signal, 'timeframe') and signal.timeframe is not None:
-                order_params['timeframe'] = signal.timeframe
-            
-            # If signal.details contains relevant Order fields, they could be mapped here.
-            # For now, assuming core fields are directly on Signal object or handled above.
-            # If signal.details is used: order_params.update(signal.details) - with caution.
-
-
-            order_to_place = Order(**order_params)
+            # Construct Order directly from signal attributes, ensuring correct mapping
+            order_to_place = Order(
+                id=str(uuid.uuid4()), # Generate a unique ID for the order
+                symbol=signal.symbol,
+                quantity=int(signal.quantity) if signal.quantity is not None else 0,
+                side=signal.side,
+                order_type=signal.order_type,
+                price=signal.price,
+                trigger_price=signal.stop_price, # Map signal.stop_price to order.trigger_price
+                # status and timestamp will be set by default in Order dataclass or by broker
+            )
             self.logger.info(f"Constructed Order: {order_to_place} from Signal ID {getattr(signal, 'id', 'N/A')}")
             self.logger.debug(f"Order status before placing with broker: {order_to_place.status}")
  
@@ -146,17 +149,18 @@ if __name__ == '__main__':
     # Setup current bar for market order simulation in MockFyersClient
     now = datetime.now()
     current_test_bar = Candle(
-        symbol="TESTSYM", timestamp=now, timeframe=Timeframe.ONE_MINUTE,
+        symbol="TESTSYM", timestamp=now, timeframe=Timeframe.MINUTE_1,
         open=100, high=102, low=99, close=101, volume=1000
     )
     mock_broker.set_current_bar("TESTSYM", current_test_bar)
-    mock_broker.current_time = now
+    mock_broker.current_time = now # Assign datetime object directly
 
     # Scenario 1: Market Buy Order (Signal.side is OrderSide.BUY)
     print("\n--- Scenario 1: Market Buy Order ---")
     market_buy_signal = Signal(
-        id="sig_market_buy_001", symbol="TESTSYM", side=OrderSide.BUY, quantity=10,
-        order_type=OrderType.MARKET, details={"info": "Test market buy"}
+        timestamp=now, # Added missing timestamp
+        symbol="TESTSYM", side=OrderSide.BUY, quantity=10,
+        order_type=OrderType.MARKET, comment="Test market buy"
     )
     exec_handler.execute_signal(market_buy_signal)
     # Expected: Order placed, position updated in mock_broker.
@@ -164,8 +168,9 @@ if __name__ == '__main__':
     # Scenario 2: Limit Sell Order
     print("\n--- Scenario 2: Limit Sell Order ---")
     limit_sell_signal = Signal(
-        id="sig_limit_sell_002", symbol="ANOTHER_SYM", side=OrderSide.SELL, quantity=5,
-        order_type=OrderType.LIMIT, price=205.50, details={"info": "Test limit sell"}
+        timestamp=now, # Added missing timestamp
+        symbol="ANOTHER_SYM", side=OrderSide.SELL, quantity=5,
+        order_type=OrderType.LIMIT, price=205.50, comment="Test limit sell"
     )
     exec_handler.execute_signal(limit_sell_signal)
     # Expected: Order placed, visible in mock_broker.open_orders.
@@ -173,24 +178,26 @@ if __name__ == '__main__':
     # Scenario 3: Stop-Market Buy Order
     print("\n--- Scenario 3: Stop-Market Buy Order ---")
     # Need to set current bar for 'STOPSYM' if mock broker uses it for validation/processing
-    mock_broker.set_current_bar("STOPSYM", Candle(symbol="STOPSYM", timestamp=now, timeframe=Timeframe.ONE_MINUTE, open=90, high=92, low=89, close=91, volume=500))
-    mock_broker.current_time = now
+    mock_broker.set_current_bar("STOPSYM", Candle(symbol="STOPSYM", timestamp=now, timeframe=Timeframe.MINUTE_1, open=90, high=92, low=89, close=91, volume=500))
+    mock_broker.current_time = now # Assign datetime object directly
     stop_market_buy_signal = Signal(
-        id="sig_stop_market_003", symbol="STOPSYM", side=OrderSide.BUY, quantity=3,
+        timestamp=now, # Added missing timestamp
+        symbol="STOPSYM", side=OrderSide.BUY, quantity=3,
         order_type=OrderType.STOP_MARKET, stop_price=93.00, # stop_price from Signal -> trigger_price for Order
-        details={"info": "Test stop-market buy"}
+        comment="Test stop-market buy"
     )
     exec_handler.execute_signal(stop_market_buy_signal)
     # Expected: Order placed, visible in mock_broker.open_orders.
 
     # Scenario 4: Stop-Limit Sell Order
     print("\n--- Scenario 4: Stop-Limit Sell Order ---")
-    mock_broker.set_current_bar("SLSYM", Candle(symbol="SLSYM", timestamp=now, timeframe=Timeframe.ONE_MINUTE, open=110, high=112, low=109, close=111, volume=600))
-    mock_broker.current_time = now
+    mock_broker.set_current_bar("SLSYM", Candle(symbol="SLSYM", timestamp=now, timeframe=Timeframe.MINUTE_1, open=110, high=112, low=109, close=111, volume=600))
+    mock_broker.current_time = now # Assign datetime object directly
     stop_limit_sell_signal = Signal(
-        id="sig_stop_limit_004", symbol="SLSYM", side=OrderSide.SELL, quantity=8,
+        timestamp=now, # Added missing timestamp
+        symbol="SLSYM", side=OrderSide.SELL, quantity=8,
         order_type=OrderType.STOP_LIMIT, price=108.00, stop_price=108.50,
-        details={"info": "Test stop-limit sell"}
+        comment="Test stop-limit sell"
     )
     exec_handler.execute_signal(stop_limit_sell_signal)
     # Expected: Order placed, visible in mock_broker.open_orders.
@@ -198,16 +205,21 @@ if __name__ == '__main__':
     # Scenario 5: Invalid Signal (e.g., missing price for LIMIT order)
     print("\n--- Scenario 5: Invalid Limit Order (missing price) ---")
     invalid_limit_signal = Signal(
-        id="sig_invalid_limit_005", symbol="BADSYM_LIMIT", side=OrderSide.BUY, quantity=1,
+        timestamp=now, # Added missing timestamp
+        symbol="BADSYM_LIMIT", side=OrderSide.BUY, quantity=1,
         order_type=OrderType.LIMIT # Price is missing
     )
     exec_handler.execute_signal(invalid_limit_signal)
     # Expected: Error logged, order not placed.
 
     # Scenario 6: Invalid Signal (missing stop_price for STOP_MARKET order)
+    # This scenario is implicitly handled by the broker's place_order validation.
+    # No direct change to Signal constructor needed here.
     print("\n--- Scenario 6: Invalid Stop-Market Order (missing stop_price) ---")
     invalid_stop_signal = Signal(
-        id="sig_invalid_stop_006", symbol="BADSYM_STOP", side=OrderSide.SELL, quantity=2,
+        # id="sig_invalid_stop_006", # Removed unexpected keyword argument 'id'
+        timestamp=now, # Added missing timestamp
+        symbol="BADSYM_STOP", side=OrderSide.SELL, quantity=2,
         order_type=OrderType.STOP_MARKET # stop_price is missing
     )
     exec_handler.execute_signal(invalid_stop_signal)

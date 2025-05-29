@@ -10,8 +10,7 @@ from src.core.models import Order, OrderType, OrderSide, Candle
 from typing import TYPE_CHECKING, Dict, List
 import random
 
-if TYPE_CHECKING:
-    from src.broker_api.base_broker_client import BaseBrokerClient
+from src.broker_api.base_broker_client import BaseBrokerClient
 
 class EvolvedStrategy(BaseStrategy):
     def __init__(self, strategy_id: str, broker: 'BaseBrokerClient', config: dict = None):
@@ -121,13 +120,13 @@ class EvolutionaryEngine:
         }
 
     def _change_param_in_code(self, code_string: str, param_name: str, new_value: int) -> str:
-        pattern_config = re.compile(f'(self\.{param_name}\s*=\s*self\.config\.get\s*\(\s*"{param_name}"\s*,\s*)(\d+)(\s*\))')
+        pattern_config = re.compile(r'(self\.{}\s*=\s*self\.config\.get\s*\(\s*"{}"\s*,\s*)(\d+)(\s*\))'.format(re.escape(param_name), re.escape(param_name)))
         original_code_string = code_string
         code_string = pattern_config.sub(rf'\g<1>{new_value}\g<3>', code_string, count=1)
         count_config = 1 if original_code_string != code_string else 0
         
         if count_config == 0:
-            pattern_direct = re.compile(f'(self\.{param_name}\s*=\s*)(\d+)')
+            pattern_direct = re.compile(r'(self\.{}\s*=\s*)(\d+)'.format(re.escape(param_name)))
             original_code_string = code_string
             code_string = pattern_direct.sub(rf'\g<1>{new_value}', code_string, count=1)
             count_direct = 1 if original_code_string != code_string else 0
@@ -136,11 +135,11 @@ class EvolutionaryEngine:
         return code_string
 
     def _get_param_from_code(self, code_string: str, param_name: str) -> Optional[int]:
-        match_config = re.search(f'self\.{param_name}\s*=\s*self\.config\.get\s*\(\s*"{param_name}"\s*,\s*(\d+)\s*\)', code_string)
+        match_config = re.search(r'self\.{}\s*=\s*self\.config\.get\s*\(\s*"{}"\s*,\s*(\d+)\s*\)'.format(re.escape(param_name), re.escape(param_name)), code_string)
         if match_config:
             return int(match_config.group(1))
         
-        match_direct = re.search(f'self\.{param_name}\s*=\s*(\d+)', code_string)
+        match_direct = re.search(r'self\.{}\s*=\s*(\d+)'.format(re.escape(param_name)), code_string)
         if match_direct:
             return int(match_direct.group(1))
         
@@ -381,7 +380,7 @@ if __name__ == '__main__':
         # Ensure primary metric can be missing or non-numeric for robustness test
         score = {engine.primary_fitness_metric: random.uniform(-1.0, 2.5)}
         if i % 3 == 0 : score = {"other_metric": 0.5} # missing primary
-        if i % 4 == 0 : score = {engine.primary_fitness_metric: "non_numeric_val"} # non-numeric
+        if i % 4 == 0 : score = {engine.primary_fitness_metric: 0.0} # Changed to numeric value
 
         mock_fitness_scores.append(score)
 

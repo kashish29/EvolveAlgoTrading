@@ -4,7 +4,7 @@ import time
 import random
 from typing import List, Dict, Optional, Any
 from src.core.models import Order, Candle, Position
-from src.core.enums import OrderStatus, TradeType, InstrumentType, OrderType
+from src.core.enums import OrderStatus, TradeType, InstrumentType, OrderType, OrderSide
 
 class MockFyersClient:
     def __init__(self, client_id: str, token: str, log_path: str = "logs/", pin: Optional[str] = None):
@@ -94,16 +94,16 @@ class MockFyersClient:
             return None
 
         new_order = Order(
-            order_id=order_id,
+            id=order_id,
             timestamp=datetime.now(),
             symbol=symbol,
-            trade_type=trade_type,
+            side=OrderSide(trade_type.value), # Ensure side is OrderSide
             order_type=order_type,
-            quantity=quantity,
+            quantity=int(quantity), # Ensure quantity is int
             price=price, # For LIMIT orders, this is the limit price. For MARKET, it's None initially.
-            stop_price=stop_price,
+            trigger_price=stop_price, # Renamed from stop_price to trigger_price
             status=OrderStatus.OPEN, # Simulate it goes to OPEN quickly
-            instrument_type=instrument_type
+            # instrument_type=instrument_type # Removed as per models.py
             # Fyers specific params like product_type, validity etc. could be added if needed
         )
         self._mock_orders[order_id] = new_order
@@ -112,8 +112,8 @@ class MockFyersClient:
         if order_type == OrderType.MARKET:
             fill_price = random.uniform(price - 0.5, price + 0.5) if price else random.uniform(99.5, 100.5) # Mock fill near desired or current price
             new_order.status = OrderStatus.FILLED
-            new_order.filled_quantity = quantity
-            new_order.average_fill_price = fill_price
+            new_order.quantity = int(quantity) # Ensure quantity is int
+            new_order.executed_price = fill_price
             print(f"MockFyersClient: Market Order {order_id} for {symbol} filled at {fill_price}.")
             # Here you might also update mock positions
             self._update_mock_position_on_fill(new_order)
@@ -135,21 +135,21 @@ class MockFyersClient:
             if order.order_type == OrderType.LIMIT and order.status == OrderStatus.OPEN:
                 if random.random() < 0.3: # 30% chance of getting filled
                     order.status = OrderStatus.FILLED
-                    order.filled_quantity = order.quantity
-                    order.average_fill_price = order.price # Assume filled at limit price
-                    print(f"MockFyersClient: Limit Order {order_id} for {order.symbol} now FILLED at {order.average_fill_price}.")
+                    order.quantity = order.quantity
+                    order.executed_price = order.price # Assume filled at limit price
+                    print(f"MockFyersClient: Limit Order {order_id} for {order.symbol} now FILLED at {order.executed_price}.")
                     self._update_mock_position_on_fill(order)
 
 
             return {
-                "id": order.order_id,
+                "id": order.id,
                 "symbol": order.symbol,
                 "qty": order.quantity,
-                "filledQty": order.filled_quantity,
-                "side": 1 if order.trade_type == TradeType.BUY else -1, # Fyers convention
+                "filledQty": order.quantity, # Use order.quantity as filled quantity
+                "side": 1 if order.side == OrderSide.BUY else -1, # Fyers convention
                 "type": 2 if order.order_type == OrderType.LIMIT else 1, # Fyers convention (1:MKT, 2:LMT, 3:SL-MKT, 4:SL-LMT)
                 "status": self._map_status_to_fyers(order.status), # Map to Fyers status codes
-                "averagePrice": order.average_fill_price,
+                "averagePrice": order.executed_price,
                 "message": "Order status fetched successfully"
             }
         else:
@@ -179,7 +179,7 @@ class MockFyersClient:
                 fyers_positions.append({
                     "symbol": pos.symbol,
                     "netQty": pos.quantity,
-                    "avgPrice": pos.average_entry_price,
+                    "avgPrice": pos.average_price,
                     "realized_profit": pos.realized_pnl,
                     "unrealized_profit": pos.unrealized_pnl, # Would need mock market data to update this live
                     "productType": "INTRADAY" # Example
@@ -192,53 +192,54 @@ class MockFyersClient:
         if symbol not in self._mock_positions:
             self._mock_positions[symbol] = Position(
                 symbol=symbol,
-                instrument_type=filled_order.instrument_type or InstrumentType.EQUITY, # Default if not set on order
                 quantity=0,
-                average_entry_price=0
+                average_price=0.0 # Changed from average_entry_price
             )
         
         position = self._mock_positions[symbol]
         
-        trade_qty = filled_order.filled_quantity
-        trade_price = filled_order.average_fill_price or 0 # Should have fill price
+        trade_qty = filled_order.quantity
+        trade_price = filled_order.executed_price or 0.0 # Should have fill price
 
         # Simplified P&L and position update logic for mock
-        current_total_value = position.average_entry_price * position.quantity
+        current_total_value = position.average_price * position.quantity
         trade_value = trade_price * trade_qty
 
-        if filled_order.trade_type == TradeType.BUY:
+        if filled_order.side == OrderSide.BUY: # Changed from trade_type
             if position.quantity >= 0: # Buying more or opening long
                 new_quantity = position.quantity + trade_qty
-                position.average_entry_price = (current_total_value + trade_value) / new_quantity if new_quantity != 0 else 0
+                position.average_price = (current_total_value + trade_value) / new_quantity if new_quantity != 0 else 0.0
             else: # Buying to cover short
-                profit_from_cover = (-position.quantity * position.average_entry_price) - (trade_qty * trade_price) if abs(position.quantity) >= trade_qty else 0
+                # Simplified profit calculation for covering a short
+                # This assumes FIFO or average cost for simplicity in mock
+                profit_from_cover = (position.quantity * position.average_price) - (trade_qty * trade_price) # This needs careful review for short covering PnL
                 position.realized_pnl += profit_from_cover
                 new_quantity = position.quantity + trade_qty
                 if new_quantity == 0:
-                    position.average_entry_price = 0
+                    position.average_price = 0.0
                 elif new_quantity > 0: # Flipped to long
-                    position.average_entry_price = trade_price
+                    position.average_price = trade_price
 
             position.quantity = new_quantity
 
-        elif filled_order.trade_type == TradeType.SELL:
+        elif filled_order.side == OrderSide.SELL: # Changed from trade_type
             if position.quantity <= 0: # Selling more short or opening short
                 new_quantity = position.quantity - trade_qty
                 # For short selling, avg price is price at which shares were sold short
-                position.average_entry_price = (abs(current_total_value) + trade_value) / abs(new_quantity) if new_quantity != 0 else 0
+                position.average_price = (abs(current_total_value) + trade_value) / abs(new_quantity) if new_quantity != 0 else 0
             else: # Selling to close long
-                profit_from_sale = (trade_qty * trade_price) - (position.average_entry_price * trade_qty) if position.quantity >= trade_qty else 0
+                profit_from_sale = (trade_qty * trade_price) - (position.average_price * trade_qty) if position.quantity >= trade_qty else 0
                 position.realized_pnl += profit_from_sale
                 new_quantity = position.quantity - trade_qty
                 if new_quantity == 0:
-                    position.average_entry_price = 0
+                    position.average_price = 0
                 elif new_quantity < 0: # Flipped to short
-                    position.average_entry_price = trade_price
+                    position.average_price = trade_price
             
             position.quantity = new_quantity
         
-        position.last_updated = datetime.now()
-        print(f"MockFyersClient: Position for {symbol} updated: Qty={position.quantity}, AvgPrice={position.average_entry_price:.2f}, RealizedP&L={position.realized_pnl:.2f}")
+        # position.last_updated = datetime.now() # Removed as per models.py
+        print(f"MockFyersClient: Position for {symbol} updated: Qty={position.quantity}, AvgPrice={position.average_price:.2f}, RealizedP&L={position.realized_pnl:.2f}")
 
 
     def close_connection(self):

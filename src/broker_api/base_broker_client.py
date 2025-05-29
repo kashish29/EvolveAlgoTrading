@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Optional
+from src.core.models import Order
+from src.core.enums import Timeframe
 
 class BaseBrokerClient(ABC):
     @abstractmethod
@@ -23,19 +26,19 @@ class BaseBrokerClient(ABC):
         pass
 
     @abstractmethod
-    def get_order_history(self, order_id: str = None, status: str = None):
+    def get_order_history(self, order_id: Optional[str] = None, status: Optional[str] = None):
         pass
 
     @abstractmethod
-    def get_trade_history(self, order_id: str = None):
+    def get_trade_history(self, order_id: Optional[str] = None):
         pass
 
     @abstractmethod
-    def place_order(self, order: 'Order'):
+    def place_order(self, order: Order):
         pass
 
     @abstractmethod
-    def modify_order(self, order_id: str, new_price: float = None, new_quantity: int = None, new_trigger_price: float = None):
+    def modify_order(self, order_id: str, new_price: Optional[float] = None, new_quantity: Optional[int] = None, new_trigger_price: Optional[float] = None):
         pass
 
     @abstractmethod
@@ -43,7 +46,7 @@ class BaseBrokerClient(ABC):
         pass
 
     @abstractmethod
-    def get_historical_candles(self, symbol: str, timeframe: 'Timeframe', from_date: 'datetime', to_date: 'datetime'):
+    def get_historical_candles(self, symbol: str, timeframe: Timeframe, from_date: datetime, to_date: datetime):
         pass
 
     @abstractmethod

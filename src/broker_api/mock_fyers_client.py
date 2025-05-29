@@ -3,9 +3,9 @@ import logging
 from datetime import datetime
 from src.broker_api.base_broker_client import BaseBrokerClient
 # Forward references for type hinting if needed
+import pandas as pd
 from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from src.core.models import Order # Keep Order if used, or remove if not
+from src.core.models import Order, Trade # Keep Order if used, or remove if not
 from src.core.models import Timeframe, Candle # Ensure Candle and Timeframe are imported
 from typing import Union, Dict, Any, Optional, List # Ensure List is here
 
@@ -14,7 +14,7 @@ class MockFyersClient(BaseBrokerClient):
                  historical_data: Union[Dict, Any] = None, # Can be HDM instance or dict
                  initial_cash: float = 100000.0, 
                  commission_rate: float = 0.0003):
-        self.current_time = None
+        self.current_time: Optional[datetime] = None
         self.initial_cash = initial_cash
         self.cash: float = initial_cash
         self.positions: dict = {}  # Stores symbol: {'quantity': int, 'average_price': float}
@@ -66,7 +66,8 @@ class MockFyersClient(BaseBrokerClient):
             "best_ask": {"price": 100.05, "quantity": 10}
         }
 
-    def get_order_history(self, order_id: str = None, status: str = None) -> list['Order']:
+
+    def get_order_history(self, order_id: Optional[str] = None, status: Optional[str] = None) -> List['Order']:
         filtered_orders = self.all_orders
         if order_id is not None:
             # Assuming Order objects will have an 'id' attribute
@@ -78,7 +79,7 @@ class MockFyersClient(BaseBrokerClient):
         
         return filtered_orders
 
-    def get_trade_history(self, order_id: str = None) -> list['Trade']:
+    def get_trade_history(self, order_id: Optional[str] = None) -> List['Trade']:
         filtered_trades = self.trade_log
         if order_id is not None:
             # Assuming Trade objects will have an 'order_id' attribute
@@ -91,16 +92,17 @@ class MockFyersClient(BaseBrokerClient):
         order_id = f"mock_order_{self.order_id_counter}"
         setattr(order, 'id', order_id) # Set the order ID on the order object
 
+
         # Correctly access Enum .value for string representation
         order_type_attr = getattr(order, 'order_type', None)
-        order_type_str = order_type_attr.value if hasattr(order_type_attr, 'value') else str(order_type_attr)
+        order_type_str = order_type_attr.value if order_type_attr else str(order_type_attr)
         order_type_processed = order_type_str.upper()
 
         order_symbol = getattr(order, 'symbol', None)
         order_quantity = getattr(order, 'quantity', 0)
         
         order_side_attr = getattr(order, 'side', None)
-        order_side_str = order_side_attr.value if hasattr(order_side_attr, 'value') else str(order_side_attr)
+        order_side_str = order_side_attr.value if order_side_attr else str(order_side_attr)
         order_side_processed = order_side_str.upper()
 
 
@@ -123,14 +125,24 @@ class MockFyersClient(BaseBrokerClient):
                 symbol_data_in_historical = self.historical_data.get(order_symbol)
                 if symbol_data_in_historical and 'last_price' in symbol_data_in_historical:
                     base_price = symbol_data_in_historical['last_price']
-            
+
             # If not found in historical_data dict, or historical_data is not a dict (e.g. HDM instance),
             # try to use the current bar's close price. This is the primary source during backtesting.
             if base_price is None:
-                current_bar_data = self.get_current_bar(order_symbol)
-                if current_bar_data and hasattr(current_bar_data, 'close'):
-                    base_price = current_bar_data.close
+                if order_symbol is not None:
+                    current_bar_data = self.get_current_bar(order_symbol)
+                    if current_bar_data and current_bar_data.close is not None:
+                        base_price = current_bar_data.close
+                    else:
+                        self.logger.warning(f"Could not get current bar data for {order_symbol} or close price is None. Using default price.")
+                        base_price = random.uniform(99.5, 100.5) # Fallback price
                 else:
+                    self.logger.error(f"Order symbol is None for order {order_id}. Cannot get current bar data.")
+                    setattr(order, 'status', "REJECTED")
+                    setattr(order, 'reject_reason', "Missing order symbol")
+                    self.all_orders.append(order)
+                    self.simulated_order_updates_log.append(order)
+                    return order_id, "REJECTED"
                     # Absolute fallback if no other price source is available
                     base_price = 100.00  # Default fallback price
                     self.logger.warning(
@@ -339,7 +351,8 @@ class MockFyersClient(BaseBrokerClient):
                 self.logger.info(f"{order_type_processed} order {order_id} for {order_quantity} {order_symbol} @ {actual_fill_price:.2f} COMPLETED. Commission: {commission:.2f}")
 
 
-    def modify_order(self, order_id: str, new_price: float = None, new_quantity: int = None, new_trigger_price: float = None) -> tuple[bool, str]:
+
+    def modify_order(self, order_id: str, new_price: Optional[float] = None, new_quantity: Optional[int] = None, new_trigger_price: Optional[float] = None) -> tuple[bool, str]:
         if order_id not in self.open_orders:
             self.logger.warning(f"Attempt to modify order {order_id} which is not in open_orders.")
             return False, "Order not found or not modifiable"
@@ -477,7 +490,7 @@ class MockFyersClient(BaseBrokerClient):
             })
         return data_to_return
 
-    def get_current_bar(self, symbol: str) -> Any: # Returns 'Candle | None'
+    def get_current_bar(self, symbol: str) -> Optional[Candle]: # Returns 'Candle | None'
         bar = self.current_bars.get(symbol)
         if bar is None:
             self.logger.warning(f"No current bar data available for symbol: {symbol}")
