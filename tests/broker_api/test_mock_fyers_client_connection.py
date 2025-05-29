@@ -15,9 +15,8 @@ class TestMockFyersClientConnection(unittest.TestCase):
         client = MockFyersClient()
         
         # The logger name might be 'MockFyersClient' or 'src.broker_api.mock_fyers_client'
-        # Trying 'src.broker_api.mock_fyers_client' first as it's a common pattern with getLogger(__name__)
-        # If this fails to capture logs, the alternative 'MockFyersClient' should be tried.
-        logger_name_to_test = 'src.broker_api.mock_fyers_client'
+        # The logger name is based on self.__class__.__name__ in MockFyersClient
+        logger_name_to_test = 'MockFyersClient'
 
         with self.assertLogs(logger_name_to_test, level='INFO') as cm:
             # Test connect()
@@ -33,8 +32,8 @@ class TestMockFyersClientConnection(unittest.TestCase):
                 self.fail(f"client.disconnect() raised an exception unexpectedly: {e}")
 
         # Verify log messages
-        self.assertIn(f"INFO:{logger_name_to_test}:MockFyersClient connected.", cm.output)
-        self.assertIn(f"INFO:{logger_name_to_test}:MockFyersClient disconnected.", cm.output)
+        self.assertTrue(any(f"INFO:{logger_name_to_test}:MockFyersClient connected." in log_msg for log_msg in cm.output))
+        self.assertTrue(any(f"INFO:{logger_name_to_test}:MockFyersClient disconnected." in log_msg for log_msg in cm.output))
         
         # Check connection status if available (assuming an is_connected attribute or similar)
         # This part is speculative as the original class definition isn't provided

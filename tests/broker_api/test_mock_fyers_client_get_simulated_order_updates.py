@@ -25,7 +25,7 @@ class TestMockFyersClientGetSimulatedOrderUpdates(unittest.TestCase):
         """Helper method to create a basic order object for placing."""
         order_id_val = f"{order_id_prefix}_{str(uuid.uuid4())}" if order_id_prefix else str(uuid.uuid4())
         return Order(
-            order_id=order_id_val, 
+            id=order_id_val,  # Changed from order_id to id
             symbol=symbol,
             quantity=quantity,
             side=side,
@@ -48,8 +48,8 @@ class TestMockFyersClientGetSimulatedOrderUpdates(unittest.TestCase):
 
         updates = self.client.get_simulated_order_updates()
         self.assertEqual(len(updates), 1, "Expected one rejected order update.")
-        self.assertEqual(updates[0].order_id, order_req_reject.order_id)
-        self.assertEqual(updates[0].status, OrderStatus.REJECTED)
+        self.assertEqual(updates[0].id, order_req_reject.id) 
+        self.assertEqual(updates[0].status, OrderStatus.REJECTED.value) # Ensure .value
         
         self.assertEqual(len(self.client.get_simulated_order_updates()), 0, "Log should be cleared after get.")
 
@@ -65,8 +65,8 @@ class TestMockFyersClientGetSimulatedOrderUpdates(unittest.TestCase):
 
         updates = self.client.get_simulated_order_updates()
         self.assertEqual(len(updates), 1, "Expected one filled order update.")
-        self.assertEqual(updates[0].order_id, order_id_fill)
-        self.assertEqual(updates[0].status, OrderStatus.COMPLETED)
+        self.assertEqual(updates[0].id, order_id_fill) 
+        self.assertEqual(updates[0].status, OrderStatus.COMPLETED.value) # Ensure .value
         self.assertIsNotNone(updates[0].executed_price)
         self.assertEqual(updates[0].executed_price, fill_price) # Limit orders fill at limit price
         
@@ -81,8 +81,8 @@ class TestMockFyersClientGetSimulatedOrderUpdates(unittest.TestCase):
         
         updates = self.client.get_simulated_order_updates()
         self.assertEqual(len(updates), 1, "Expected one cancelled order update.")
-        self.assertEqual(updates[0].order_id, order_id_cancel)
-        self.assertEqual(updates[0].status, OrderStatus.CANCELLED)
+        self.assertEqual(updates[0].id, order_id_cancel) 
+        self.assertEqual(updates[0].status, OrderStatus.CANCELLED.value) # Ensure .value
         
         self.assertEqual(len(self.client.get_simulated_order_updates()), 0, "Log should be cleared.")
 
@@ -108,12 +108,12 @@ class TestMockFyersClientGetSimulatedOrderUpdates(unittest.TestCase):
         updates = self.client.get_simulated_order_updates()
         self.assertEqual(len(updates), 3, "Expected three mixed order updates.")
         
-        statuses = sorted([o.status for o in updates])
-        expected_statuses = sorted([OrderStatus.REJECTED, OrderStatus.COMPLETED, OrderStatus.CANCELLED])
+        statuses = sorted([str(o.status) for o in updates]) # o.status is already a string
+        expected_statuses = sorted([OrderStatus.REJECTED.value, OrderStatus.COMPLETED.value, OrderStatus.CANCELLED.value])
         self.assertEqual(statuses, expected_statuses, "Statuses of mixed updates do not match.")
 
-        order_ids = sorted([o.order_id for o in updates])
-        expected_order_ids = sorted([order_req_reject_mix.order_id, order_id_fill_mix, order_id_cancel_mix])
+        order_ids = sorted([o.id for o in updates])
+        expected_order_ids = sorted([order_req_reject_mix.id, order_id_fill_mix, order_id_cancel_mix]) # Changed to .id
         self.assertEqual(order_ids, expected_order_ids, "Order IDs of mixed updates do not match.")
         
         self.assertEqual(len(self.client.get_simulated_order_updates()), 0, "Log should be cleared.")
@@ -133,7 +133,7 @@ class TestMockFyersClientGetSimulatedOrderUpdates(unittest.TestCase):
         
         market_order_req = self._create_order_request(market_symbol, OrderType.MARKET, OrderSide.BUY, 1.0, order_id_prefix="market")
         _, status = self.client.place_order(market_order_req)
-        self.assertEqual(status, OrderStatus.COMPLETED, "Market order should complete successfully.")
+        self.assertEqual(status, OrderStatus.COMPLETED.value, "Market order should complete successfully.") # Use .value
         
         updates = self.client.get_simulated_order_updates()
         # Based on docstring: "Typically, this log is for orders that change state

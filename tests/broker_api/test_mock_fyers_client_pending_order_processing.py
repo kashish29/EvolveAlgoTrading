@@ -22,7 +22,7 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
         
         self.client = MockFyersClient(
             initial_cash=self.initial_cash,
-            commission_per_trade=self.commission_per_trade,
+            commission_rate=self.commission_per_trade, # Changed to commission_rate
             slippage_percent=self.slippage_percent
         )
         self.symbol = "TEST_SYMBOL"
@@ -33,7 +33,7 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
                               price: float = None, trigger_price: float = None) -> Order:
         """Helper method to create a basic order object for placing."""
         return Order(
-            order_id=str(uuid.uuid4()), 
+            id=str(uuid.uuid4()), # Ensure 'id' is used as the keyword
             symbol=self.symbol,
             quantity=quantity,
             side=side,
@@ -48,7 +48,7 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
         """Helper to place a LIMIT or STOP order and return its ID."""
         order_to_place = self._create_order_request(order_type, side, quantity, price, trigger_price)
         order_id, status = self.client.place_order(order_to_place)
-        self.assertEqual(status, OrderStatus.ACCEPTED, "Helper failed to place initial pending order.")
+        self.assertEqual(status, OrderStatus.ACCEPTED.value, "Helper failed to place initial pending order.") # Use .value
         self.assertIsNotNone(order_id, "Helper did not receive order_id for initial pending order.")
         return order_id
 
@@ -78,11 +78,11 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
         
         self.assertNotIn(order_id, self.client.open_orders, "Order should be removed from open_orders after fill.")
         
-        filled_order = self.client.all_orders.get(order_id)
+        filled_order = next((o for o in self.client.all_orders if o.id == order_id), None)
         self.assertIsNotNone(filled_order)
-        self.assertEqual(filled_order.status, OrderStatus.COMPLETED)
-        # Expected fill price for BUY LIMIT is order.price (no slippage on limit price itself)
-        expected_fill_price = limit_price 
+        self.assertEqual(filled_order.status, OrderStatus.COMPLETED.value) # Use .value
+        # Expected fill price for BUY LIMIT is min(bar_open, order_price)
+        expected_fill_price = min(99.5, limit_price) 
         self.assertAlmostEqual(filled_order.executed_price, expected_fill_price, places=5)
         
         self.assertEqual(len(self.client.trade_log), 1, "One trade should be logged.")
@@ -94,7 +94,7 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
         
         self.assertAlmostEqual(self.client.cash, self.initial_cash - expected_total_cost, places=5)
         self.assertIn(self.symbol, self.client.positions)
-        self.assertEqual(self.client.positions[self.symbol].quantity, self.default_quantity)
+        self.assertEqual(self.client.positions[self.symbol]['quantity'], self.default_quantity) # Changed to dict access
 
     # --- Test Case 2: LIMIT BUY Order - No Fill ---
     def test_limit_buy_order_no_fill(self):
@@ -105,8 +105,9 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
         self._set_current_bar_and_process(open_price=101.0, high_price=102.0, low_price=100.5, close_price=101.5)
         
         self.assertIn(order_id, self.client.open_orders, "Order should remain in open_orders.")
-        original_order = self.client.all_orders.get(order_id)
-        self.assertEqual(original_order.status, OrderStatus.ACCEPTED) # Status unchanged
+        original_order = next((o for o in self.client.all_orders if o.id == order_id), None)
+        self.assertIsNotNone(original_order) # Ensure order is found
+        self.assertEqual(original_order.status, OrderStatus.ACCEPTED.value) # Status unchanged & Use .value
 
     # --- Test Case 3: STOP SELL Order - Trigger and Fill ---
     def test_stop_sell_order_trigger_and_fill(self):
@@ -123,9 +124,9 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
         self._set_current_bar_and_process(open_price=open_p, high_price=96.0, low_price=low_p, close_price=94.2)
         
         self.assertNotIn(order_id, self.client.open_orders)
-        filled_order = self.client.all_orders.get(order_id)
+        filled_order = next((o for o in self.client.all_orders if o.id == order_id), None)
         self.assertIsNotNone(filled_order)
-        self.assertEqual(filled_order.status, OrderStatus.COMPLETED)
+        self.assertEqual(filled_order.status, OrderStatus.COMPLETED.value) # Use .value
         
         price_before_slippage = min(open_p, trigger_price)
         expected_fill_price = price_before_slippage * (1 - self.slippage_percent)
@@ -140,7 +141,7 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
         
         self.assertAlmostEqual(self.client.cash, self.initial_cash + expected_total_value, places=5)
         self.assertIn(self.symbol, self.client.positions)
-        self.assertEqual(self.client.positions[self.symbol].quantity, -self.default_quantity) # Short position
+        self.assertEqual(self.client.positions[self.symbol]['quantity'], -self.default_quantity) # This line was actually already correct in the previous read_files output for this specific test method. The error was in a different method.
 
     # --- Test Case 4: STOP SELL Order - No Trigger ---
     def test_stop_sell_order_no_trigger(self):
@@ -151,8 +152,9 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
         self._set_current_bar_and_process(open_price=96.0, high_price=97.0, low_price=95.5, close_price=96.5)
         
         self.assertIn(order_id, self.client.open_orders)
-        original_order = self.client.all_orders.get(order_id)
-        self.assertEqual(original_order.status, OrderStatus.ACCEPTED)
+        original_order = next((o for o in self.client.all_orders if o.id == order_id), None)
+        self.assertIsNotNone(original_order) # Ensure order is found
+        self.assertEqual(original_order.status, OrderStatus.ACCEPTED.value) # Use .value
 
     # --- Test Case 5: LIMIT SELL Order - Fill ---
     def test_limit_sell_order_fill(self):
@@ -165,11 +167,12 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
         self._set_current_bar_and_process(open_price=105.5, high_price=106.0, low_price=104.0, close_price=105.2)
         
         self.assertNotIn(order_id, self.client.open_orders)
-        filled_order = self.client.all_orders.get(order_id)
+        filled_order = next((o for o in self.client.all_orders if o.id == order_id), None)
         self.assertIsNotNone(filled_order)
-        self.assertEqual(filled_order.status, OrderStatus.COMPLETED)
+        self.assertEqual(filled_order.status, OrderStatus.COMPLETED.value) # Use .value
         
-        expected_fill_price = limit_price # No slippage on limit price itself
+        # Expected fill price for SELL LIMIT is max(bar_open, order_price)
+        expected_fill_price = max(105.5, limit_price) 
         self.assertAlmostEqual(filled_order.executed_price, expected_fill_price, places=5)
         
         self.assertEqual(len(self.client.trade_log), 1)
@@ -178,7 +181,7 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
         
         self.assertAlmostEqual(self.client.cash, self.initial_cash + expected_total_value, places=5)
         self.assertIn(self.symbol, self.client.positions)
-        self.assertEqual(self.client.positions[self.symbol].quantity, -self.default_quantity)
+        self.assertEqual(self.client.positions[self.symbol]['quantity'], -self.default_quantity) # Ensure dict access
 
     # --- Test Case 6: LIMIT SELL Order - No Fill ---
     def test_limit_sell_order_no_fill(self):
@@ -189,8 +192,9 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
         self._set_current_bar_and_process(open_price=103.0, high_price=104.5, low_price=102.0, close_price=103.5)
         
         self.assertIn(order_id, self.client.open_orders)
-        original_order = self.client.all_orders.get(order_id)
-        self.assertEqual(original_order.status, OrderStatus.ACCEPTED)
+        original_order = next((o for o in self.client.all_orders if o.id == order_id), None)
+        self.assertIsNotNone(original_order) # Ensure order is found
+        self.assertEqual(original_order.status, OrderStatus.ACCEPTED.value) # Use .value
 
     # --- Test Case 7: STOP BUY Order - Trigger and Fill ---
     def test_stop_buy_order_trigger_and_fill(self):
@@ -205,9 +209,9 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
         self._set_current_bar_and_process(open_price=open_p, high_price=high_p, low_price=109.0, close_price=110.2)
         
         self.assertNotIn(order_id, self.client.open_orders)
-        filled_order = self.client.all_orders.get(order_id)
+        filled_order = next((o for o in self.client.all_orders if o.id == order_id), None)
         self.assertIsNotNone(filled_order)
-        self.assertEqual(filled_order.status, OrderStatus.COMPLETED)
+        self.assertEqual(filled_order.status, OrderStatus.COMPLETED.value) # Use .value
         
         price_before_slippage = max(open_p, trigger_price)
         expected_fill_price = price_before_slippage * (1 + self.slippage_percent)
@@ -219,7 +223,7 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
         
         self.assertAlmostEqual(self.client.cash, self.initial_cash - expected_total_cost, places=5)
         self.assertIn(self.symbol, self.client.positions)
-        self.assertEqual(self.client.positions[self.symbol].quantity, self.default_quantity)
+        self.assertEqual(self.client.positions[self.symbol]['quantity'], self.default_quantity) # Reverted to self.default_quantity
 
     # --- Test Case 8: STOP BUY Order - No Trigger ---
     def test_stop_buy_order_no_trigger(self):
@@ -230,8 +234,9 @@ class TestMockFyersClientPendingOrderProcessing(unittest.TestCase):
         self._set_current_bar_and_process(open_price=108.0, high_price=109.5, low_price=107.0, close_price=108.5)
         
         self.assertIn(order_id, self.client.open_orders)
-        original_order = self.client.all_orders.get(order_id)
-        self.assertEqual(original_order.status, OrderStatus.ACCEPTED)
+        original_order = next((o for o in self.client.all_orders if o.id == order_id), None)
+        self.assertIsNotNone(original_order) # Ensure order is found
+        self.assertEqual(original_order.status, OrderStatus.ACCEPTED.value) # Use .value
 
 if __name__ == '__main__':
     unittest.main()

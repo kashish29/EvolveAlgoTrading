@@ -38,6 +38,11 @@ class PerformanceReporter:
         if not isinstance(self.equity_curve.index, pd.DatetimeIndex):
             logger.error("PerformanceReporter: Error - Equity curve index is not DatetimeIndex. Cannot resample for daily returns.")
             return pd.Series(dtype=float)
+        
+        # Check if the index contains any valid (non-NaT) timestamps. If not, resampling is meaningless.
+        if isinstance(self.equity_curve.index, pd.DatetimeIndex) and self.equity_curve.index.isna().all():
+            logger.warning("PerformanceReporter: Warning - Equity curve DatetimeIndex contains all NaT values. Cannot calculate daily returns.")
+            return pd.Series(dtype=float)
 
         # Resample to daily frequency, taking the last value of each day
         daily_equity = self.equity_curve.resample('D').last()
@@ -144,6 +149,7 @@ class PerformanceReporter:
 
             metrics["Avg Winning Trade PnL"] = winning_trades_df['pnl'].mean() if num_winning_trades > 0 else 0
             metrics["Avg Losing Trade PnL"] = losing_trades_df['pnl'].mean() if num_losing_trades > 0 else 0
+            metrics["Avg Trade PnL"] = self.trades['pnl'].sum() / total_trades if total_trades > 0 else 0
         else:
             logger.warning("PerformanceReporter: Trades data is missing or 'pnl' column not found. Cannot calculate trade-based metrics.")
             metrics["Total Trades"] = 0
@@ -151,6 +157,7 @@ class PerformanceReporter:
             metrics["Profit Factor"] = 0
             metrics["Avg Winning Trade PnL"] = 0
             metrics["Avg Losing Trade PnL"] = 0
+            metrics["Avg Trade PnL"] = 0 # Add this line
             
         return metrics
 
@@ -251,7 +258,7 @@ class PerformanceReporter:
 
         if output_path:
             logger.info(f"PerformanceReporter: Attempting to save equity curve plot to {output_path}")
-            plt.savefig(output_path)
+            fig.savefig(output_path) # Changed from plt.savefig to fig.savefig
             logger.info(f"PerformanceReporter: Equity curve plot saved to {output_path}")
         
         if show:
@@ -263,8 +270,7 @@ class PerformanceReporter:
 
     def plot_drawdown_underwater(self, output_path: Optional[str] = None, show: bool = True):
         logger.info(f"plot_drawdown_underwater called with output_path='{output_path}', show={show}")
-        if output_path is None:
-            output_path = "drawdown_underwater_plot.png" # Default if None is passed
+        # Removed default assignment to output_path to allow None to skip saving
         if self.daily_returns.empty:
             logger.warning("PerformanceReporter: Daily returns are empty. Cannot plot drawdown.")
             return

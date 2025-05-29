@@ -39,7 +39,7 @@ class TestPerformanceReporter(unittest.TestCase):
         self.default_equity_curve = create_sample_equity_curve()
         self.default_trades = create_sample_trades_df()
         self.default_benchmark = create_sample_equity_curve(daily_change_mean=50, daily_change_std=200).pct_change().dropna().rename("Benchmark")
-        self.reporter = PerformanceReporter(self.default_trades, self.default_equity_curve, self.default_benchmark)
+        self.reporter = PerformanceReporter(trades=self.default_trades, equity_curve=self.default_equity_curve, benchmark_returns=self.default_benchmark)
 
     # 1. __init__ and _calculate_daily_returns
     def test_init_and_calculate_daily_returns_valid_equity_curve(self):
@@ -59,7 +59,7 @@ class TestPerformanceReporter(unittest.TestCase):
         equity_non_dt_index.index = range(len(equity_non_dt_index))
         
         with patch('builtins.print') as mock_print: # Suppress print warnings during test
-            reporter_non_dt = PerformanceReporter(self.default_trades, equity_non_dt_index)
+            reporter_non_dt = PerformanceReporter(trades=self.default_trades, equity_curve=equity_non_dt_index)
             # It should attempt conversion. If successful, daily_returns will be calculated.
             # The PerformanceReporter's __init__ tries to convert.
             # The conversion to DatetimeIndex will happen, but for a range index,
@@ -72,20 +72,20 @@ class TestPerformanceReporter(unittest.TestCase):
     def test_init_with_empty_equity_curve(self):
         empty_equity = pd.Series(dtype=float)
         with patch('builtins.print') as mock_print:
-            reporter_empty = PerformanceReporter(self.default_trades, empty_equity)
+            reporter_empty = PerformanceReporter(trades=self.default_trades, equity_curve=empty_equity)
         self.assertTrue(reporter_empty.daily_returns.empty)
 
     def test_init_with_short_equity_curve(self):
         short_equity = pd.Series([100000], index=[pd.to_datetime('2023-01-01')])
         with patch('builtins.print') as mock_print:
-            reporter_short = PerformanceReporter(self.default_trades, short_equity)
+            reporter_short = PerformanceReporter(trades=self.default_trades, equity_curve=short_equity)
         self.assertTrue(reporter_short.daily_returns.empty) # pct_change on 1 item is NaN, then dropped
 
     def test_init_with_and_without_benchmark(self):
-        reporter_with_bm = PerformanceReporter(self.default_trades, self.default_equity_curve, benchmark_returns=self.default_benchmark)
+        reporter_with_bm = PerformanceReporter(trades=self.default_trades, equity_curve=self.default_equity_curve, benchmark_returns=self.default_benchmark)
         self.assertIsNotNone(reporter_with_bm.benchmark_returns)
         
-        reporter_without_bm = PerformanceReporter(self.default_trades, self.default_equity_curve, benchmark_returns=None)
+        reporter_without_bm = PerformanceReporter(trades=self.default_trades, equity_curve=self.default_equity_curve, benchmark_returns=None)
         self.assertIsNone(reporter_without_bm.benchmark_returns)
 
     # 2. generate_quantstats_report
@@ -117,7 +117,7 @@ class TestPerformanceReporter(unittest.TestCase):
 
     @patch('src.analytics.performance_reporter.quantstats.reports.html')
     def test_generate_quantstats_report_no_benchmark(self, mock_qs_html):
-        reporter_no_bm = PerformanceReporter(self.default_trades, self.default_equity_curve, benchmark_returns=None)
+        reporter_no_bm = PerformanceReporter(trades=self.default_trades, equity_curve=self.default_equity_curve, benchmark_returns=None)
         reporter_no_bm.generate_quantstats_report() # Default path and title
         
         args, kwargs = mock_qs_html.call_args
@@ -134,7 +134,7 @@ class TestPerformanceReporter(unittest.TestCase):
             'pnl': [10, 10, -5, 10], 
             'entry_timestamp': dates[:4], 'exit_timestamp': dates[1:], 'symbol': ['X']*4
         })
-        reporter = PerformanceReporter(trades, equity)
+        reporter = PerformanceReporter(trades=trades, equity_curve=equity)
         metrics = reporter.calculate_key_metrics()
 
         self.assertAlmostEqual(metrics["Total Return [%]"], 25.0, places=2) # (125/100 - 1)*100
@@ -152,7 +152,7 @@ class TestPerformanceReporter(unittest.TestCase):
             'pnl': [-10, -10, 5, -10],
             'entry_timestamp': dates[:4], 'exit_timestamp': dates[1:], 'symbol': ['X']*4
         })
-        reporter = PerformanceReporter(trades, equity)
+        reporter = PerformanceReporter(trades=trades, equity_curve=equity)
         metrics = reporter.calculate_key_metrics()
 
         self.assertAlmostEqual(metrics["Total Return [%]"], -25.0, places=2) # (75/100 - 1)*100
@@ -167,7 +167,7 @@ class TestPerformanceReporter(unittest.TestCase):
         dates = pd.date_range(start='2023-01-01', periods=5, freq='D')
         equity = pd.Series([100, 105, 102, 108, 110], index=dates) # Equity can still change
         no_trades = create_sample_trades_df(num_trades=0)
-        reporter = PerformanceReporter(no_trades, equity)
+        reporter = PerformanceReporter(trades=no_trades, equity_curve=equity)
         metrics = reporter.calculate_key_metrics()
 
         self.assertAlmostEqual(metrics["Total Return [%]"], 10.0, places=2)
@@ -181,7 +181,7 @@ class TestPerformanceReporter(unittest.TestCase):
         dates = pd.date_range(start='2023-01-01', periods=3, freq='D')
         equity = pd.Series([100, 110, 120], index=dates)
         trades = pd.DataFrame({'pnl': [10, 10], 'entry_timestamp': dates[:2], 'exit_timestamp': dates[1:], 'symbol': ['X']*2})
-        reporter = PerformanceReporter(trades, equity)
+        reporter = PerformanceReporter(trades=trades, equity_curve=equity)
         metrics = reporter.calculate_key_metrics()
         self.assertEqual(metrics["Win Rate [%]"], 100.0)
         self.assertEqual(metrics["Profit Factor"], float('inf')) # No losses
@@ -191,7 +191,7 @@ class TestPerformanceReporter(unittest.TestCase):
         dates = pd.date_range(start='2023-01-01', periods=3, freq='D')
         equity = pd.Series([100, 90, 80], index=dates)
         trades = pd.DataFrame({'pnl': [-10, -10], 'entry_timestamp': dates[:2], 'exit_timestamp': dates[1:], 'symbol': ['X']*2})
-        reporter = PerformanceReporter(trades, equity)
+        reporter = PerformanceReporter(trades=trades, equity_curve=equity)
         metrics = reporter.calculate_key_metrics()
         self.assertEqual(metrics["Win Rate [%]"], 0.0)
         self.assertEqual(metrics["Profit Factor"], 0.0) # No profits
@@ -240,9 +240,9 @@ class TestPerformanceReporter(unittest.TestCase):
         self.reporter.plot_equity_curve(output_path=output_file, show=False)
         
         mock_plt.subplots.assert_called_once()
-        mock_plt.savefig.assert_called_with(output_file)
+        mock_fig.savefig.assert_called_with(output_file) # Changed mock_plt to mock_fig
         self.assertFalse(mock_plt.show.called)
-        self.assertTrue(mock_plt.close.called)
+        mock_plt.close.assert_called_with(mock_fig) # More precise assertion
 
     @patch('src.analytics.performance_reporter.plt')
     def test_plot_equity_curve_no_benchmark(self, mock_plt):
@@ -250,14 +250,14 @@ class TestPerformanceReporter(unittest.TestCase):
         mock_ax = MagicMock()
         mock_plt.subplots.return_value = (mock_fig, mock_ax)
 
-        reporter_no_bm = PerformanceReporter(self.default_trades, self.default_equity_curve, benchmark_returns=None)
+        reporter_no_bm = PerformanceReporter(trades=self.default_trades, equity_curve=self.default_equity_curve, benchmark_returns=None)
         reporter_no_bm.plot_equity_curve(show=False)
         
         mock_plt.subplots.assert_called_once()
         mock_ax.plot.assert_called_once() # Only strategy equity should be plotted
         args_strategy, _ = mock_ax.plot.call_args_list[0]
         pd.testing.assert_series_equal(pd.Series(args_strategy[1]), reporter_no_bm.equity_curve, check_index=False, check_names=False)
-        self.assertTrue(mock_plt.close.called)
+        mock_plt.close.assert_called_with(mock_fig) # More precise assertion
 
 
     # 5. plot_drawdown_underwater
@@ -276,7 +276,7 @@ class TestPerformanceReporter(unittest.TestCase):
         self.assertEqual(kwargs['ax'], mock_ax)
         
         self.assertTrue(mock_plt_general.show.called)
-        self.assertFalse(mock_plt_general.savefig.called) # savefig would be on the fig object
+        self.assertFalse(mock_fig.savefig.called) # savefig is on fig, not mock_plt_general (which is plt)
         mock_plt_general.close.assert_called_with(mock_fig)
 
 
@@ -291,12 +291,12 @@ class TestPerformanceReporter(unittest.TestCase):
         self.reporter.plot_drawdown_underwater(output_path=output_file, show=False)
         
         mock_fig.savefig.assert_called_with(output_file)
-        self.assertFalse(mock_plt_general.show.called)
-        mock_plt_general.close.assert_called_with(mock_fig)
+        self.assertFalse(mock_plt_general.show.called) # plt.show()
+        mock_plt_general.close.assert_called_with(mock_fig) # plt.close(fig)
 
     def test_empty_daily_returns_for_plots(self):
         empty_equity = pd.Series(dtype=float, index=pd.to_datetime([]))
-        reporter_empty = PerformanceReporter(self.default_trades, empty_equity)
+        reporter_empty = PerformanceReporter(trades=self.default_trades, equity_curve=empty_equity)
         self.assertTrue(reporter_empty.daily_returns.empty)
 
         with patch('src.analytics.performance_reporter.logger') as mock_logger:

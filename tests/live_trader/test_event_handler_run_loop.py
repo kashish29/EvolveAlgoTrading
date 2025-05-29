@@ -45,12 +45,12 @@ class TestEventHandlerRunSimulationLoop(unittest.TestCase):
             open=101, high=102, low=100, close=101, volume=1200
         )
         self.sample_order1 = Order(
-            order_id="order1", symbol="SYM1", quantity=10, side=OrderSide.BUY,
+            id="order1", symbol="SYM1", quantity=10, side=OrderSide.BUY, # Changed order_id to id
             order_type=OrderType.LIMIT, price=100.0, status=OrderStatus.COMPLETED,
             timestamp=self.ts1
         )
         self.sample_order2 = Order(
-            order_id="order2", symbol="SYM1", quantity=10, side=OrderSide.SELL,
+            id="order2", symbol="SYM1", quantity=5, side=OrderSide.SELL, # Changed order_id to id
             order_type=OrderType.MARKET, status=OrderStatus.ACCEPTED,
             timestamp=self.ts2
         )
@@ -95,7 +95,7 @@ class TestEventHandlerRunSimulationLoop(unittest.TestCase):
         with self.assertLogs(level='WARNING') as log_cm:
             self.event_handler.run_simulation_loop()
         
-        self.assertIn(f"Unknown event type: {type(unknown_event)}", log_cm.output[0])
+        self.assertTrue(any(f"Received unknown event type: {type(unknown_event)}" in msg for msg in log_cm.output))
 
         self.mock_strategy.on_bar.assert_not_called()
         self.mock_strategy.on_order_update.assert_not_called()
@@ -113,7 +113,10 @@ class TestEventHandlerRunSimulationLoop(unittest.TestCase):
         with self.assertLogs(level='ERROR') as log_cm:
             self.event_handler.run_simulation_loop()
         
-        self.assertIn(f"Error processing event {self.sample_order1}: Test error from on_order_update", log_cm.output[0])
+        self.assertTrue(any("Error processing event" in msg and 
+                            f"Order(id='{self.sample_order1.id}'" in msg and # Check part of order representation
+                            "Test error from on_order_update" in msg 
+                            for msg in log_cm.output), "Expected log message for strategy error not found or incorrect.")
 
         self.assertEqual(self.mock_strategy.on_bar.call_count, 2)
         self.mock_strategy.on_bar.assert_any_call({self.sample_candle1.symbol: self.sample_candle1})

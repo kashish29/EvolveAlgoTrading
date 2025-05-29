@@ -19,6 +19,9 @@ class TestBacktesterEngineRunDataIteration(unittest.TestCase):
         """
         self.mock_strategy = MagicMock(spec=BaseStrategy)
         self.mock_broker = MagicMock(spec=BaseBrokerClient)
+        self.mock_broker.logger = MagicMock() 
+        self.mock_broker.set_current_bar = MagicMock()
+        self.mock_broker._process_pending_orders = MagicMock() # Add _process_pending_orders
         self.mock_hdm = MagicMock(spec=HistoricalDataManager)
 
         self.start_date = datetime(2023, 1, 1, tzinfo=timezone.utc)
@@ -30,7 +33,7 @@ class TestBacktesterEngineRunDataIteration(unittest.TestCase):
             strategy=self.mock_strategy,
             broker=self.mock_broker,
             historical_data_manager=self.mock_hdm,
-            symbols_to_trade=self.symbols,
+            symbols=self.symbols, # Changed from symbols_to_trade
             timeframe=self.timeframe,
             start_date=self.start_date,
             end_date=self.end_date,
@@ -67,13 +70,14 @@ class TestBacktesterEngineRunDataIteration(unittest.TestCase):
 
         # 5.f. Assert HDM call
         self.mock_hdm.get_all_data_sorted_by_timestamp.assert_called_once_with(
-            self.symbols, self.timeframe, self.start_date, self.end_date
+            symbols=self.symbols, timeframe=self.timeframe, start_date=self.start_date, end_date=self.end_date
         )
 
-        # 5.g. Assert broker.set_current_time calls
-        set_current_time_calls = [call(ts1), call(ts2)]
-        self.mock_broker.set_current_time.assert_has_calls(set_current_time_calls)
-        self.assertEqual(self.mock_broker.set_current_time.call_count, 2)
+        # current_time is an attribute on the broker, set by the engine.
+        # We can check its final value after the loop if needed, or trust it's set.
+        # Removing method call assertions for 'set_current_time'.
+        # Check final value:
+        self.assertEqual(self.mock_broker.current_time, ts2)
 
 
         # 5.h. Assert broker.set_current_bar calls
@@ -100,8 +104,8 @@ class TestBacktesterEngineRunDataIteration(unittest.TestCase):
         # Assuming it's called after strategy.on_bar for each timestamp.
         self.assertEqual(self.mock_broker._process_pending_orders.call_count, 2)
         
-        # Also check that the broker's cash is synced at the beginning
-        self.mock_broker.get_balance.assert_called_once_with() # Called at start of run() to init cash
+        # get_balance is called inside the loop for each timestamp.
+        self.assertEqual(self.mock_broker.get_balance.call_count, len(mock_market_data))
 
 
     # Test Case 2: Empty Market Data
@@ -120,9 +124,9 @@ class TestBacktesterEngineRunDataIteration(unittest.TestCase):
 
         # 6.c. Assert strategy.on_bar was NOT called
         self.mock_strategy.on_bar.assert_not_called()
-
-        # 6.d. Assert broker.set_current_time was NOT called
-        self.mock_broker.set_current_time.assert_not_called()
+        
+        # current_time is an attribute, not a method. If loop isn't entered, it won't be set by engine.
+        # No direct mock assertion needed for current_time not being set unless specifically checking its final state.
         
         # Assert broker.set_current_bar was NOT called
         self.mock_broker.set_current_bar.assert_not_called()

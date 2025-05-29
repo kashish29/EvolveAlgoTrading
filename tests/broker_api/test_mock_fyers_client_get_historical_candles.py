@@ -44,8 +44,8 @@ class TestMockFyersClientGetHistoricalCandles(unittest.TestCase):
         candles = self.client.get_historical_candles(
             symbol='SYM1',
             timeframe=Timeframe.DAY_1,
-            from_date=datetime(2023, 1, 1, tzinfo=timezone.utc), # Inclusive start
-            to_date=datetime(2023, 1, 3, tzinfo=timezone.utc)     # Inclusive end
+            from_date=datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc), 
+            to_date=datetime(2023, 1, 3, 23, 59, 59, tzinfo=timezone.utc)     # Ensure full end day
         )
         self.assertEqual(len(candles), 3, "Should retrieve 3 DAY_1 candles for SYM1.")
         retrieved_timestamps = sorted([c.timestamp for c in candles])
@@ -57,8 +57,8 @@ class TestMockFyersClientGetHistoricalCandles(unittest.TestCase):
         candles = self.client.get_historical_candles(
             symbol='SYM1',
             timeframe=Timeframe.DAY_1,
-            from_date=datetime(2023, 1, 2, tzinfo=timezone.utc),
-            to_date=datetime(2023, 1, 3, tzinfo=timezone.utc)
+            from_date=datetime(2023, 1, 2, 0, 0, 0, tzinfo=timezone.utc),
+            to_date=datetime(2023, 1, 3, 23, 59, 59, tzinfo=timezone.utc) # Ensure full end day
         )
         self.assertEqual(len(candles), 2, "Should retrieve 2 DAY_1 candles for SYM1 in range.")
         retrieved_timestamps = sorted([c.timestamp for c in candles])
@@ -123,8 +123,8 @@ class TestMockFyersClientGetHistoricalCandles(unittest.TestCase):
         candles = client_with_bad_data.get_historical_candles(
             symbol='SYM_BAD',
             timeframe=Timeframe.DAY_1,
-            from_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
-            to_date=datetime(2023, 1, 2, tzinfo=timezone.utc) # Range covers both valid candles
+            from_date=datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+            to_date=datetime(2023, 1, 2, 23, 59, 59, tzinfo=timezone.utc) # Ensure full end day coverage
         )
         
         self.assertEqual(len(candles), 2, "Should skip non-Candle object and return valid candles.")

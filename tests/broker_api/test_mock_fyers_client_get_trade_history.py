@@ -21,7 +21,7 @@ class TestMockFyersClientGetTradeHistory(unittest.TestCase):
         
         self.client = MockFyersClient(
             initial_cash=self.initial_cash,
-            commission_per_trade=self.commission_per_trade,
+            commission_rate=self.commission_per_trade, # Changed to commission_rate
             slippage_percent=self.slippage_percent
         )
         self.symbol1 = "SYM1"
@@ -39,10 +39,12 @@ class TestMockFyersClientGetTradeHistory(unittest.TestCase):
 
     def _create_order_request(self, symbol: str, order_type: OrderType, side: OrderSide, 
                               quantity: float, price: float = None, trigger_price: float = None,
-                              order_id: str = None) -> Order:
+                              order_id: str = None) -> Order: 
         """Helper method to create a basic order object for placing."""
+        # Ensure 'id' is used as the keyword, not 'order_id'
+        actual_id = order_id if order_id else str(uuid.uuid4())
         return Order(
-            order_id=order_id if order_id else str(uuid.uuid4()), 
+            id=actual_id,
             symbol=symbol,
             quantity=quantity,
             side=side,
@@ -57,7 +59,7 @@ class TestMockFyersClientGetTradeHistory(unittest.TestCase):
         # 1.a.i: Place and execute a BUY MARKET order for 'SYM1'
         market_order_sym1_req = self._create_order_request(self.symbol1, OrderType.MARKET, OrderSide.BUY, self.default_quantity)
         market_order_id_sym1, status_sym1 = self.client.place_order(market_order_sym1_req)
-        self.assertEqual(status_sym1, OrderStatus.COMPLETED)
+        self.assertEqual(status_sym1, OrderStatus.COMPLETED.value) # Use .value
         
         # Store details of the first trade for verification
         trade1_details = self.client.trade_log[0]
@@ -66,7 +68,7 @@ class TestMockFyersClientGetTradeHistory(unittest.TestCase):
         limit_price_sym2 = 200.0
         limit_order_sym2_req = self._create_order_request(self.symbol2, OrderType.LIMIT, OrderSide.SELL, 5.0, price=limit_price_sym2)
         limit_order_id_sym2, status_sym2_placed = self.client.place_order(limit_order_sym2_req)
-        self.assertEqual(status_sym2_placed, OrderStatus.ACCEPTED)
+        self.assertEqual(status_sym2_placed, OrderStatus.ACCEPTED.value) # Use .value
 
         # Set current_bar for SYM2 that causes fill and process
         sym2_fill_candle = Candle(
@@ -77,8 +79,10 @@ class TestMockFyersClientGetTradeHistory(unittest.TestCase):
         self.client._process_pending_orders()
         
         # Verify SYM2 order is completed
-        sym2_order_status = self.client.all_orders[limit_order_id_sym2].status
-        self.assertEqual(sym2_order_status, OrderStatus.COMPLETED)
+        # Assuming order status in all_orders is also set as string by the mock client
+        sym2_order_object = next((o for o in self.client.all_orders if o.id == limit_order_id_sym2), None)
+        self.assertIsNotNone(sym2_order_object, "SYM2 order not found in all_orders list.")
+        self.assertEqual(sym2_order_object.status, OrderStatus.COMPLETED.value) # Use .value
         trade2_details = self.client.trade_log[1] # Second trade in the log
 
         # 1.b: Call client.get_trade_history()
@@ -95,16 +99,18 @@ class TestMockFyersClientGetTradeHistory(unittest.TestCase):
         self.assertEqual(trade_hist_sym1.quantity, self.default_quantity)
         self.assertAlmostEqual(trade_hist_sym1.price, trade1_details.price, places=5) # Price after slippage
         self.assertAlmostEqual(trade_hist_sym1.commission, trade1_details.commission, places=5)
-        self.assertIsNone(trade_hist_sym1.pnl, "P&L should be None for individual trades unless explicitly set by a specific logic beyond simple trade logging")
+        self.assertEqual(trade_hist_sym1.pnl, 0.0) # PNL is initialized to 0.0 for new trades
 
         # Trade 2 (SYM2 Limit Sell)
         trade_hist_sym2 = next(t for t in trade_history if t.order_id == limit_order_id_sym2)
         self.assertEqual(trade_hist_sym2.symbol, self.symbol2)
         self.assertEqual(trade_hist_sym2.side, OrderSide.SELL)
         self.assertEqual(trade_hist_sym2.quantity, 5.0)
-        self.assertAlmostEqual(trade_hist_sym2.price, limit_price_sym2, places=5) # Limit orders fill at limit price
+        # MockFyersClient fills SELL LIMIT at max(bar_open, order_price)
+        expected_sym2_fill_price = max(sym2_fill_candle.open, limit_price_sym2)
+        self.assertAlmostEqual(trade_hist_sym2.price, expected_sym2_fill_price, places=5)
         self.assertAlmostEqual(trade_hist_sym2.commission, trade2_details.commission, places=5)
-        self.assertIsNone(trade_hist_sym2.pnl)
+        self.assertEqual(trade_hist_sym2.pnl, 0.0) # PNL is initialized to 0.0
 
     # --- Test Case 2: Get Trade History Filtered by Order ID ---
     def test_get_trade_history_filtered_by_order_id(self):

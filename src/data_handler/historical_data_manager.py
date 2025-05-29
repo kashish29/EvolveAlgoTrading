@@ -59,9 +59,11 @@ class HistoricalDataManager:
         print(f"HistoricalDataManager: Requesting data for {symbol} from {start_date} to {end_date} via broker client.")
         
         try:
+            # Ensure timeframe is passed as string value if it's an enum
+            broker_timeframe_arg = timeframe.value if isinstance(timeframe, Timeframe) else timeframe
             data_df = self.broker_client.get_historical_data(
                 symbol=symbol,
-                timeframe=timeframe,
+                timeframe=broker_timeframe_arg,
                 start_date=start_date,
                 end_date=end_date
             )

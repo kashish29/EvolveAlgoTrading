@@ -16,12 +16,14 @@ class TestEvolutionaryEngine(unittest.TestCase):
         self.engine = EvolutionaryEngine() # Uses default param_ranges
 
     def _create_code_from_params(self, sw, lw, qty, symbol="TEST"):
-        """Helper to create a strategy code string from parameters."""
-        code = DEFAULT_STRATEGY_TEMPLATE
-        code = code.replace("{{SYMBOL}}", f'"{symbol}"') # Ensure symbol is a string in the code
-        code = code.replace("{{SHORT_WINDOW}}", str(sw))
-        code = code.replace("{{LONG_WINDOW}}", str(lw))
-        code = code.replace("{{QUANTITY}}", str(qty))
+        """Helper to create a strategy code string from parameters using engine's methods."""
+        code = str(DEFAULT_STRATEGY_TEMPLATE) # Start with a fresh template copy
+        # Note: DEFAULT_STRATEGY_TEMPLATE doesn't have {{SYMBOL}}, symbol is set via config.get("symbol", "DEFAULT_SYMBOL")
+        # We'll assume the strategy config passed to an EvolvedStrategy instance would handle the symbol.
+        # For testing parameter manipulation, we focus on sw, lw, qty.
+        code = self.engine._change_param_in_code(code, "short_window", sw)
+        code = self.engine._change_param_in_code(code, "long_window", lw)
+        code = self.engine._change_param_in_code(code, "quantity", qty)
         return code
 
     # --- Test initialize_population() ---
@@ -56,11 +58,13 @@ class TestEvolutionaryEngine(unittest.TestCase):
 
     # 5.d. Test the edge case
     def test_initialize_population_edge_case_sw_lw_constraint(self):
-        custom_engine = EvolutionaryEngine(param_ranges={
+        custom_engine = EvolutionaryEngine() # Instantiate with default
+        # Set custom param_ranges for this specific test
+        custom_engine.param_ranges = {
             'short_window': (48, 49),
-            'long_window': (10, 50), # Initial range before constraint adjustment
+            'long_window': (10, 50), 
             'quantity': (1, 10)
-        })
+        }
         # _ensure_constraints in initialize_population should adjust long_window min if needed.
         # Specifically, min_long_window will be max(param_ranges['long_window'][0], sw + 1).
         # If sw is 49, min_long_window becomes 50.

@@ -158,6 +158,18 @@ class MockFyersClient(BaseBrokerClient):
             trade_value = fill_price * order_quantity
             commission = trade_value * self.commission_rate
 
+            # Check for insufficient funds for BUY MARKET orders
+            if order_side_processed == "BUY" and self.cash < (trade_value + commission):
+                self.logger.warning(f"Market order {order_id} for {order_quantity} {order_symbol} REJECTED: Insufficient funds. Required: {trade_value + commission:.2f}, Available: {self.cash:.2f}")
+                setattr(order, 'status', "REJECTED")
+                setattr(order, 'reject_reason', "Insufficient funds")
+                self.all_orders.append(order)
+                # Market order rejections (like insufficient funds) might not go to simulated_order_updates_log
+                # if the rejection is immediate and synchronous, as per the docstring of get_simulated_order_updates.
+                # However, adding it here for consistency if some rejections are expected there.
+                # Let's assume critical rejections like this are immediately returned and logged.
+                # self.simulated_order_updates_log.append(order) 
+                return order_id, "REJECTED"
 
             # Increment Trade ID & Create Trade Object
             self.trade_id_counter += 1
@@ -561,14 +573,15 @@ class MockFyersClient(BaseBrokerClient):
         data_to_return: List[Candle] = []
         
         # Check if self.historical_data is a dict and contains the symbol's data
-        # This structure is used in test_engine.py where historical_data is {symbol: [Candle_objects]}
+        # This structure is used in test_engine.py where historical_data is {symbol: {timeframe: [Candle_objects]}}
         if isinstance(self.historical_data, dict) and symbol in self.historical_data:
-            all_symbol_candles = self.historical_data.get(symbol, [])
+            symbol_timeframe_data = self.historical_data.get(symbol, {}) # Get dict of timeframes for symbol
+            candles_for_specific_timeframe = symbol_timeframe_data.get(timeframe, []) # Get list for the requested timeframe
             
-            for candle_obj in all_symbol_candles:
+            for candle_obj in candles_for_specific_timeframe: # Iterate over the correct list of candles
                 # Assuming candle_obj are actual Candle instances
                 if not isinstance(candle_obj, Candle):
-                    self.logger.warning(f"MockFyersClient: Item in historical_data for {symbol} is not a Candle object: {type(candle_obj)}. Skipping.")
+                    self.logger.warning(f"MockFyersClient: Item in historical_data for {symbol} at timeframe {timeframe} is not a Candle object: {type(candle_obj)}. Skipping.")
                     continue
 
                 candle_timestamp = getattr(candle_obj, 'timestamp', None)
@@ -582,10 +595,8 @@ class MockFyersClient(BaseBrokerClient):
                             data_to_return.append(candle_obj)
                         # else:
                         #    self.logger.debug(f"Skipping candle due to timeframe mismatch: expected {timeframe}, got {candle_obj.timeframe}")
-                    else:
-                        # If candle_obj.timeframe is not set or not a Timeframe enum, include it based on date only
-                        # Or, be stricter: self.logger.warning(f"Candle for {symbol} at {candle_timestamp} missing valid timeframe attribute.")
-                        data_to_return.append(candle_obj) # Defaulting to less strict for now
+                    # else: # Removed the else block: if timeframe attribute is missing or not a Timeframe enum, it's skipped.
+                        # self.logger.warning(f"Candle for {symbol} at {candle_timestamp} missing valid timeframe attribute or not a Timeframe enum. Skipping.")
             
             self.logger.info(f"MockFyersClient: Returning {len(data_to_return)} pre-loaded Candle objects for {symbol} matching criteria.")
         else:

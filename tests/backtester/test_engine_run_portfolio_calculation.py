@@ -20,6 +20,9 @@ class TestBacktesterEngineRunPortfolioCalculation(unittest.TestCase):
         """
         self.mock_strategy = MagicMock(spec=BaseStrategy)
         self.mock_broker = MagicMock(spec=BaseBrokerClient)
+        self.mock_broker.logger = MagicMock()
+        self.mock_broker.set_current_bar = MagicMock()
+        self.mock_broker._process_pending_orders = MagicMock() # Add _process_pending_orders
         self.mock_hdm = MagicMock(spec=HistoricalDataManager)
 
         self.start_date = datetime(2023, 1, 1, tzinfo=timezone.utc)
@@ -31,7 +34,7 @@ class TestBacktesterEngineRunPortfolioCalculation(unittest.TestCase):
             strategy=self.mock_strategy,
             broker=self.mock_broker,
             historical_data_manager=self.mock_hdm,
-            symbols_to_trade=self.symbols,
+            symbols=self.symbols, # Changed from symbols_to_trade
             timeframe=self.timeframe,
             start_date=self.start_date,
             end_date=self.end_date,

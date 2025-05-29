@@ -28,8 +28,8 @@ class TestPerformanceReporterInit(unittest.TestCase):
     # Test Case 1: Basic Initialization
     def test_basic_initialization(self):
         reporter = PerformanceReporter(
-            trades_df=self.sample_trades_df,
-            equity_curve_series=self.sample_equity_curve_series
+            trades=self.sample_trades_df,
+            equity_curve=self.sample_equity_curve_series
         )
         pd.testing.assert_frame_equal(reporter.trades, self.sample_trades_df)
         pd.testing.assert_series_equal(reporter.equity_curve, self.sample_equity_curve_series)
@@ -45,9 +45,9 @@ class TestPerformanceReporterInit(unittest.TestCase):
     # Test Case 2: Initialization with All Arguments
     def test_initialization_with_all_arguments(self):
         reporter = PerformanceReporter(
-            trades_df=self.sample_trades_df,
-            equity_curve_series=self.sample_equity_curve_series,
-            benchmark_returns_series=self.sample_benchmark_series,
+            trades=self.sample_trades_df,
+            equity_curve=self.sample_equity_curve_series,
+            benchmark_returns=self.sample_benchmark_series,
             config=self.sample_config
         )
         pd.testing.assert_frame_equal(reporter.trades, self.sample_trades_df)
@@ -59,52 +59,59 @@ class TestPerformanceReporterInit(unittest.TestCase):
     def test_equity_curve_index_conversion(self):
         equity_curve_string_index = pd.Series([100.0, 110.0], index=['2023-01-01', '2023-01-02'])
         reporter = PerformanceReporter(
-            trades_df=self.sample_trades_df,
-            equity_curve_series=equity_curve_string_index
+            trades=self.sample_trades_df,
+            equity_curve=equity_curve_string_index
         )
         self.assertIsInstance(reporter.equity_curve.index, pd.DatetimeIndex)
         self.assertEqual(reporter.equity_curve.index[0], pd.Timestamp('2023-01-01'))
 
         equity_curve_range_index = pd.Series([100.0, 110.0]) # Uses RangeIndex
-        with self.assertLogs(level='WARNING') as log_cm: # Expect a warning for non-datetime index if not convertible
-            reporter_range = PerformanceReporter(
-                trades_df=self.sample_trades_df,
-                equity_curve_series=equity_curve_range_index
-            )
-        # Check if a warning about non-convertible index was logged.
-        # This depends on the internal implementation of _ensure_datetime_index.
-        # If it raises an error, this test needs to change to assertRaises.
-        # If it successfully converts RangeIndex to DatetimeIndex (e.g. if it's just 0, 1, 2... and interpreted as days from an epoch)
-        # then the warning might not appear. Assuming it logs a warning or fails for simple RangeIndex.
-        # For this test, let's assume if it doesn't convert, it might log or daily_returns would be problematic.
-        # A more robust test would be to see if daily_returns calculation fails or is empty if index is not dates.
-        # The current implementation of _ensure_datetime_index in PerformanceReporter tries pd.to_datetime.
-        # pd.to_datetime on a simple RangeIndex (0, 1, ...) will convert them to nanoseconds from epoch.
+        # pd.to_datetime on a simple RangeIndex (0, 1, ...) will convert them to nanoseconds from epoch by default.
+        # This is a valid conversion and should not log warnings.
+        reporter_range = PerformanceReporter(
+            trades=self.sample_trades_df,
+            equity_curve=equity_curve_range_index
+        )
+        # Check that the index was indeed converted to DatetimeIndex
         self.assertIsInstance(reporter_range.equity_curve.index, pd.DatetimeIndex)
+        # Verify that daily returns are calculated.
+        # With a RangeIndex like [0, 1], pd.to_datetime converts to 1970-01-01 00:00:00.000000000 
+        # and 1970-01-01 00:00:00.000000001 (Unit is nanoseconds by default for int64).
+        # These fall on the same day after floor('D').
+        # equity_curve.resample('D').last() will give one entry for this day.
+        # pct_change() on a single-entry Series results in an empty Series.
+        self.assertTrue(reporter_range.daily_returns.empty, 
+                        "Daily returns should be empty for RangeIndex [0,1] as it converts to the same day.")
 
 
     # Test Case 4: Benchmark Returns Index Conversion
     def test_benchmark_returns_index_conversion(self):
         benchmark_string_index = pd.Series([0.01, -0.005], index=['2023-01-01', '2023-01-02'])
         reporter = PerformanceReporter(
-            trades_df=self.sample_trades_df,
-            equity_curve_series=self.sample_equity_curve_series,
-            benchmark_returns_series=benchmark_string_index
+            trades=self.sample_trades_df,
+            equity_curve=self.sample_equity_curve_series,
+            benchmark_returns=benchmark_string_index
         )
         self.assertIsInstance(reporter.benchmark_returns.index, pd.DatetimeIndex)
         self.assertEqual(reporter.benchmark_returns.index[0], pd.Timestamp('2023-01-01'))
 
     # Test Case 5: _calculate_daily_returns is Called
-    @patch.object(PerformanceReporter, '_calculate_daily_returns', wraps=PerformanceReporter._calculate_daily_returns)
-    def test_calculate_daily_returns_called(self, mock_calculate_daily_returns):
-        reporter = PerformanceReporter(
-            trades_df=self.sample_trades_df,
-            equity_curve_series=self.sample_equity_curve_series
-        )
-        mock_calculate_daily_returns.assert_called_once()
-        # Check that daily_returns is actually populated
-        self.assertIsNotNone(reporter.daily_returns)
-        self.assertTrue(len(reporter.daily_returns) > 0)
+    def test_calculate_daily_returns_called(self):
+        # We want to check if _calculate_daily_returns is called during __init__
+        # To do this, we mock _calculate_daily_returns on the class.
+        # autospec=True ensures the mock has the correct signature.
+        # We also assign a simple return value (like an empty Series) to avoid
+        # issues with wrapped methods if the original has complex dependencies not set up here.
+        # The key is to verify it was called.
+        with patch.object(PerformanceReporter, '_calculate_daily_returns', autospec=True, return_value=pd.Series(dtype=float)) as mock_calculate_daily_returns_method:
+            reporter = PerformanceReporter(
+                trades=self.sample_trades_df,
+                equity_curve=self.sample_equity_curve_series
+            )
+            # Assert that the mock was called once with the instance of reporter
+            mock_calculate_daily_returns_method.assert_called_once_with(reporter)
+            # Check that daily_returns attribute is set (it will be the return_value of the mock)
+            self.assertIsNotNone(reporter.daily_returns)
 
 
     # Test Case 6: Handling of Unparseable Equity Curve Index (Optional - Log Check)
@@ -119,8 +126,8 @@ class TestPerformanceReporterInit(unittest.TestCase):
         # For now, we'll just check that the resulting daily_returns is empty if index is all NaT.
         
         reporter = PerformanceReporter(
-            trades_df=self.sample_trades_df,
-            equity_curve_series=unparseable_equity_curve
+            trades=self.sample_trades_df,
+            equity_curve=unparseable_equity_curve
         )
         # After 'coerce', index becomes NaT. pct_change() on such series might produce all NaNs or empty.
         self.assertTrue(reporter.daily_returns.empty or reporter.daily_returns.isna().all(),
