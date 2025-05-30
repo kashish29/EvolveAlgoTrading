@@ -62,6 +62,10 @@ from src.broker_api.mock_fyers_client import MockFyersClient
 from src.strategies.example_moving_average_cross_strategy import ExampleMovingAverageCrossStrategy
 # Adjusted import path for HistoricalDataManager
 from src.data_handler.historical_data_manager import HistoricalDataManager
+from src.data_handler.data_source_factory import DataSourceFactory # Added
+from src.data_handler.data_cache import DataCache # Added
+from src.data_handler.abstract_data_source import AbstractDataSource # Added for mock_source_instance spec
+import pandas as pd # Added for DataFrame creation in mock
 from src.core.models import Candle, Timeframe, Order, OrderType, OrderSide 
 from src.backtester.metrics import calculate_all_metrics
 
@@ -109,7 +113,45 @@ class TestBacktesterEngineIntegration(unittest.TestCase):
             initial_cash=self.initial_cash, 
             commission_rate=0.001 
         )
-        self.hdm = HistoricalDataManager(broker_client=self.broker) 
+
+        # Mock dependencies for HistoricalDataManager
+        self.mock_data_factory = MagicMock(spec=DataSourceFactory)
+        self.mock_data_cache = MagicMock(spec=DataCache)
+        
+        # Instantiate HistoricalDataManager with new constructor
+        # For this integration test, the actual source type and kwargs might not be deeply exercised
+        # if the broker (MockFyersClient) is already providing all necessary data directly
+        # or if get_all_data_sorted_by_timestamp is mocked/bypassed.
+        # However, the engine *will* call hdm.get_all_data_sorted_by_timestamp, which calls hdm.fetch_historical_data.
+        # So, we need to ensure that path can work with mocks if it doesn't find data in broker directly.
+        # Let's provide basic mocks. The actual data comes from self.broker.historical_data via MockFyersClient's get_historical_data.
+        # The BacktesterEngine._load_and_prepare_data calls self.historical_data_manager.get_all_data_sorted_by_timestamp.
+        # The test's self.broker (MockFyersClient) needs to be accessible by HDM if we want it to act as a data source.
+        # This test was originally designed with HDM using the broker directly.
+        # Now, HDM uses its own sources. For this integration test to pass with minimal changes to its core logic,
+        # we might need to have the mock_factory return a data source that uses self.broker.
+        
+        self.mock_data_cache.get_data.return_value = None # Ensure cache miss for initial fetch
+
+        mock_source_instance = MagicMock(spec=AbstractDataSource) 
+        
+        # Configure the mock data source to return data based on self.broker's historical_data
+        def mock_source_fetch_data(symbol, start_date, end_date, timeframe_str):
+            # This simulates the data source fetching data, mimicking how MockFyersClient does it.
+            raw_data = self.broker.get_historical_data(symbol, timeframe_str, start_date, end_date)
+            if isinstance(raw_data, list): # MockFyersClient returns list of dicts
+                return pd.DataFrame(raw_data) if raw_data else pd.DataFrame()
+            return raw_data # Or handle if it's already a DataFrame
+
+        mock_source_instance.fetch_data.side_effect = mock_source_fetch_data
+        self.mock_data_factory.get_data_source.return_value = mock_source_instance
+
+        self.hdm = HistoricalDataManager(
+            data_source_factory=self.mock_data_factory,
+            data_cache=self.mock_data_cache,
+            default_source_type="MOCK_BROKER_WRAPPER", # Dummy type
+            default_source_kwargs={}
+        )
         
         strategy_config = {
             "symbol": self.symbol, 

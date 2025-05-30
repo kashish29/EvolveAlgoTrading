@@ -1,254 +1,337 @@
 import pandas as pd
 from datetime import datetime
-from typing import Optional, Any, Type
-from collections import defaultdict # Added import
-from src.core.models import Candle, Timeframe  # Added import
-# Attempt to import the mock client, handling potential import errors gracefully for standalone use/testing.
-class _MockFyersClientPlaceholder: # Define a placeholder class
-    def __init__(self, *args, **kwargs): pass
-    def connect(self): return False
-    def get_historical_data(self, *args, **kwargs): return None
+from typing import Optional, Any, Dict, List, Tuple # Corrected List and Tuple import
+from collections import defaultdict
 
-_ActualMockFyersClientClass: Type[Any] = _MockFyersClientPlaceholder # Initialize with placeholder
-
-try:
-    from src.broker_api.fyers_client import MockFyersClient
-    _ActualMockFyersClientClass = MockFyersClient # Assign the actual class if import succeeds
-except ImportError:
-    print("Warning: MockFyersClient not found at its expected location. Using a placeholder.")
-
-MockFyersClientInstance = Optional[Any] # Define a type alias for MockFyersClient instance or None
+from src.core.models import Candle, Timeframe
+from .data_source_factory import DataSourceFactory
+from .data_cache import DataCache
+from .abstract_data_source import AbstractDataSource # Ensure this is imported
 
 
 class HistoricalDataManager:
-    def __init__(self, broker_client: Any):
+    def __init__(self, 
+                 data_source_factory: DataSourceFactory, 
+                 data_cache: DataCache,
+                 default_source_type: str = "CSV",
+                 default_source_kwargs: Optional[Dict[str, Any]] = None):
         """
-        Initializes the HistoricalDataManager.
+        Initializes the HistoricalDataManager with a data source factory and a cache.
 
         Args:
-            broker_client: An instance of a broker client (e.g., MockFyersClient or a live FyersClient).
-                           It's typed as Any to allow flexibility for different client implementations
-                           that adhere to a common interface for fetching historical data.
+            data_source_factory (DataSourceFactory): Factory to create data source instances.
+            data_cache (DataCache): Cache to store and retrieve fetched data.
+            default_source_type (str): The default type of data source to use (e.g., "CSV").
+            default_source_kwargs (Optional[Dict[str, Any]]): Default keyword arguments 
+                                                              for the data source. 
+                                                              (e.g., {'csv_directory_path': '/path/to/csvs'})
         """
-        if broker_client is None:
-            raise ValueError("Broker client cannot be None.")
-        self.broker_client = broker_client
-        print("HistoricalDataManager initialized.")
+        if data_source_factory is None:
+            raise ValueError("DataSourceFactory cannot be None.")
+        if data_cache is None:
+            raise ValueError("DataCache cannot be None.")
+            
+        self.data_source_factory = data_source_factory
+        self.data_cache = data_cache
+        self.default_source_type = default_source_type
+        self.default_source_kwargs = default_source_kwargs if default_source_kwargs is not None else {}
+        
+        print(f"HistoricalDataManager initialized with default source type: {self.default_source_type}")
 
-    def fetch_historical_data(self, symbol: str, timeframe: str, 
-                              start_date: datetime, end_date: datetime) -> Optional[pd.DataFrame]:
+    def _generate_cache_key(self, symbol: str, timeframe: str, 
+                            start_date: datetime, end_date: datetime, source_type: str) -> str:
         """
-        Fetches historical market data using the configured broker client.
+        Generates a unique cache key for a data request.
+        Includes source_type in the key to differentiate if data could come from multiple sources.
+        """
+        # Standardize date format for key consistency
+        start_date_str = start_date.strftime("%Y%m%d%H%M%S")
+        end_date_str = end_date.strftime("%Y%m%d%H%M%S")
+        return f"{source_type.upper()}_{symbol}_{timeframe}_{start_date_str}_{end_date_str}"
+
+    def fetch_historical_data(self, 
+                              symbol: str, 
+                              timeframe: str, # Should be string like "1D", "5MIN"
+                              start_date: datetime, 
+                              end_date: datetime,
+                              source_type: Optional[str] = None,
+                              source_kwargs: Optional[Dict[str, Any]] = None
+                             ) -> pd.DataFrame: # Return DataFrame, not Optional[DataFrame]
+        """
+        Fetches historical market data.
+        It first checks the cache. If data is not found in cache,
+        it uses the DataSourceFactory to get a data source, fetches data,
+        stores it in the cache, and then returns it.
 
         Args:
             symbol (str): The trading symbol (e.g., "SBIN-EQ").
-            timeframe (str): The timeframe for the data (e.g., "1D", "5MIN"). 
-                               (Should align with what the broker_client expects)
-            start_date (datetime): The start date for the data.
-            end_date (datetime): The end date for the data.
-
-        Returns:
-            Optional[pd.DataFrame]: A Pandas DataFrame containing the historical data
-                                    (columns: timestamp, open, high, low, close, volume, symbol, timeframe),
-                                    or None if data fetching fails.
-        """
-        if not hasattr(self.broker_client, 'get_historical_data'):
-            print("Error: The provided broker client does not have a 'get_historical_data' method.")
-            return None
-
-        print(f"HistoricalDataManager: Requesting data for {symbol} from {start_date} to {end_date} via broker client.")
-        
-        try:
-            # Ensure timeframe is passed as string value if it's an enum
-            broker_timeframe_arg = timeframe.value if isinstance(timeframe, Timeframe) else timeframe
-            data_df = self.broker_client.get_historical_data(
-                symbol=symbol,
-                timeframe=broker_timeframe_arg,
-                start_date=start_date,
-                end_date=end_date
-            )
-
-            if data_df is not None and isinstance(data_df, list):
-                if not data_df: # If the list is empty
-                    # Create an empty DataFrame with expected columns if possible, 
-                    # or handle as per existing logic for empty data.
-                    # For now, let's convert to an empty DataFrame.
-                    # Callers might expect certain columns even if empty.
-                    data_df = pd.DataFrame(data_df) # This will create an empty DF if list is empty
-                else:
-                    data_df = pd.DataFrame(data_df)
-
-            if data_df is not None and not data_df.empty:
-                # Optional: Add further validation or processing here
-                # e.g., ensure required columns are present, sort by date, etc.
-                required_cols = ['timestamp', 'open', 'high', 'low', 'close']
-                if not all(col in data_df.columns for col in required_cols):
-                    print(f"Warning: Fetched data for {symbol} is missing one or more required columns: {required_cols}")
-                    # Depending on strictness, could return None or try to adapt
-                
-                # Convert timestamp to datetime objects if they aren't already
-                if 'timestamp' in data_df.columns and not pd.api.types.is_datetime64_any_dtype(data_df['timestamp']):
-                     data_df['timestamp'] = pd.to_datetime(data_df['timestamp'])
-
-                print(f"HistoricalDataManager: Successfully fetched {len(data_df)} bars for {symbol}.")
-            elif data_df is not None and data_df.empty:
-                print(f"HistoricalDataManager: Fetched no data for {symbol} for the given period (empty DataFrame returned).")
-            else: # data_df is None
-                print(f"HistoricalDataManager: Failed to fetch data for {symbol} (broker returned None).")
-
-            return data_df
-
-        except Exception as e:
-            print(f"HistoricalDataManager: An error occurred while fetching data for {symbol}: {e}")
-            return None
-
-    def get_all_data_sorted_by_timestamp(self, symbols: list[str], timeframe: str,
-                                         start_date: datetime, end_date: datetime) -> list[tuple[datetime, dict[str, Candle]]]:
-        """
-        Fetches historical data for multiple symbols, combines them, and sorts by timestamp.
-
-        Args:
-            symbols (list[str]): A list of trading symbols.
             timeframe (str): The timeframe for the data (e.g., "1D", "5MIN").
             start_date (datetime): The start date for the data.
             end_date (datetime): The end date for the data.
+            source_type (Optional[str]): Specific data source type to use. 
+                                         If None, uses default_source_type.
+            source_kwargs (Optional[Dict[str, Any]]): Arguments for the data source.
+                                                      If None, uses default_source_kwargs.
 
         Returns:
-            list[tuple[datetime, dict[str, Candle]]]: A list of tuples, where each tuple contains:
-                - A datetime object representing the timestamp.
-                - A dictionary where keys are symbol strings and values are Candle objects for that timestamp.
-              The list is sorted by timestamp in ascending order.
+            pd.DataFrame: A Pandas DataFrame containing the historical data.
+                          The DataFrame will have 'timestamp' (datetime64) and OHLCV columns.
+                          Returns an empty DataFrame if data fetching fails or no data is found.
         """
-        all_candles_by_timestamp: defaultdict[datetime, dict[str, Candle]] = defaultdict(dict)
+        current_source_type = source_type if source_type is not None else self.default_source_type
+        current_source_kwargs = source_kwargs if source_kwargs is not None else self.default_source_kwargs
         
-        # Convert timeframe string to Timeframe enum
-        try:
-            timeframe_enum = Timeframe(timeframe)
-        except ValueError:
-            # Attempt to map common timeframe strings to enum values if direct mapping fails
-            # This is a basic example; a more robust solution might involve a comprehensive mapping dictionary
-            if timeframe == "1D":
-                timeframe_enum = Timeframe.DAY_1
-            elif timeframe == "5MIN": # Example, adjust as per actual common inputs vs enum values
-                timeframe_enum = Timeframe.MINUTE_5
-            # Add more mappings as needed
-            else:
-                print(f"Warning: Timeframe string '{timeframe}' not directly mapped. Attempting fallback or default.")
-                # Fallback or raise error if no suitable mapping found
-                # For now, let's try to find a match by replacing "minute" with "MIN" etc. or use a default
-                # This part needs to be robust based on expected timeframe string formats
-                try:
-                    # Example: "5minute" -> "5MINUTE" -> Timeframe.MINUTE_5 (if enum names are like MINUTE_5)
-                    # This is highly dependent on enum naming and input string variations.
-                    processed_tf_str = timeframe.upper() # Basic processing
-                    if not processed_tf_str.startswith("MINUTE_") and "MINUTE" in processed_tf_str:
-                         processed_tf_str = processed_tf_str.replace("MINUTE","MINUTE_")
+        cache_key = self._generate_cache_key(symbol, timeframe, start_date, end_date, current_source_type)
+        
+        # 1. Check cache
+        cached_df = self.data_cache.get_data(cache_key)
+        if cached_df is not None:
+            print(f"HistoricalDataManager: Returning cached data for {symbol} ({timeframe})")
+            return cached_df
 
-                    timeframe_enum = Timeframe[processed_tf_str] # This requires exact match after processing
+        print(f"HistoricalDataManager: No cache found for {symbol} ({timeframe}). Fetching from source.")
+
+        # 2. If cache miss, get data source from factory
+        data_source: Optional[AbstractDataSource] = self.data_source_factory.get_data_source(
+            current_source_type, **current_source_kwargs
+        )
+
+        if data_source is None:
+            print(f"HistoricalDataManager: Failed to get data source for type '{current_source_type}'.")
+            return pd.DataFrame() # Return empty DataFrame
+
+        # 3. Fetch data using the data source
+        try:
+            # The timeframe argument for data_source.fetch_data should be a string
+            # If Timeframe enum is passed here, it should be converted to its string value.
+            # Assuming 'timeframe' arg to this method is already a string.
+            fetched_df = data_source.fetch_data(symbol, start_date, end_date, timeframe)
+            
+            # fetch_data in AbstractDataSource and its implementations is expected to return
+            # an empty DataFrame if there's an error or no data, and it should have already
+            # called standardize_data and validate_data.
+
+            if fetched_df is None: # Should ideally not happen if sources return empty DF on failure
+                 print(f"HistoricalDataManager: Data source returned None for {symbol}. Returning empty DataFrame.")
+                 fetched_df = pd.DataFrame()
+            
+        except Exception as e:
+            print(f"HistoricalDataManager: Error fetching data for {symbol} via {current_source_type}: {e}")
+            return pd.DataFrame() # Return empty DataFrame on error
+
+        # 4. Store in cache if data is not empty
+        # DataCache.store_data already checks if df is empty and won't store if it is.
+        if not fetched_df.empty:
+            self.data_cache.store_data(cache_key, fetched_df)
+            print(f"HistoricalDataManager: Successfully fetched and cached data for {symbol} ({timeframe}).")
+        else:
+            print(f"HistoricalDataManager: Fetched empty data for {symbol} ({timeframe}). Not caching.")
+            
+        # Ensure returned DataFrame has 'timestamp' and ohlcv columns, even if empty.
+        # The data_source itself should guarantee this based on AbstractDataSource contract.
+        # If fetched_df is empty, it should ideally have these columns defined.
+        # If not, we might need to enforce it here.
+        # For now, rely on data_source.standardize_data() to have handled this.
+
+        return fetched_df
+
+
+    def get_all_data_sorted_by_timestamp(self, 
+                                         symbols: List[str], # Use List from typing
+                                         timeframe: str, # Expect string like "1D", "5MIN"
+                                         start_date: datetime, 
+                                         end_date: datetime,
+                                         source_type: Optional[str] = None,
+                                         source_kwargs: Optional[Dict[str, Any]] = None
+                                        ) -> List[Tuple[datetime, Dict[str, Candle]]]: # Use List, Tuple, Dict
+        """
+        Fetches historical data for multiple symbols using the new fetch_historical_data method,
+        combines them, and sorts by timestamp.
+
+        Args:
+            symbols (List[str]): A list of trading symbols.
+            timeframe (str): The timeframe for the data (e.g., "1D", "5MIN").
+            start_date (datetime): The start date for the data.
+            end_date (datetime): The end date for the data.
+            source_type (Optional[str]): Specific data source type to use.
+            source_kwargs (Optional[Dict[str, Any]]): Arguments for the data source.
+
+        Returns:
+            List[Tuple[datetime, Dict[str, Candle]]]: Sorted list of (timestamp, {symbol: Candle}).
+        """
+        all_candles_by_timestamp: defaultdict[datetime, Dict[str, Candle]] = defaultdict(dict)
+        
+        timeframe_enum_val: Optional[Timeframe] = None
+        try:
+            # Attempt to map the string timeframe to the Timeframe enum
+            # This is for creating Candle objects. The fetch_historical_data method
+            # will pass the timeframe string directly to the data source.
+            timeframe_enum_val = Timeframe(timeframe) # Direct mapping if string matches enum member name
+        except ValueError:
+            # Fallback for common patterns like "1D" to Timeframe.DAY_1
+            # This mapping logic should be robust or centralized if many variations are expected.
+            tf_upper = timeframe.upper()
+            if tf_upper == "1D": timeframe_enum_val = Timeframe.DAY_1
+            elif tf_upper == "5MIN": timeframe_enum_val = Timeframe.MINUTE_5
+            elif tf_upper == "1MIN": timeframe_enum_val = Timeframe.MINUTE_1
+            # Add more mappings as necessary
+            else:
+                try:
+                    # Try direct match after basic processing (e.g. "MINUTE_5" for Timeframe.MINUTE_5)
+                    timeframe_enum_val = Timeframe[tf_upper]
                 except KeyError:
-                    print(f"Error: Could not convert timeframe string '{timeframe}' to Timeframe enum. Please check mappings.")
-                    # Default to None or raise an error, depending on desired strictness
-                    # For this implementation, let's assume it might be set to None if conversion fails and Candle handles it
-                    timeframe_enum = None # Or raise ValueError("Invalid timeframe string")
+                    print(f"HistoricalDataManager Warning: Could not map timeframe string '{timeframe}' to Timeframe enum for Candle creation. Candle.timeframe might be None.")
+                    # timeframe_enum_val remains None
 
         for symbol in symbols:
-            print(f"Fetching data for symbol: {symbol}")
-            df = self.fetch_historical_data(symbol, timeframe, start_date, end_date)
+            print(f"HistoricalDataManager (get_all_data): Fetching data for symbol: {symbol}, timeframe: {timeframe}")
+            df = self.fetch_historical_data(
+                symbol, timeframe, start_date, end_date, 
+                source_type=source_type, source_kwargs=source_kwargs
+            )
+
             if df is not None and not df.empty:
+                # Ensure 'timestamp' is datetime after fetching
+                if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
+                    print(f"HistoricalDataManager Warning: Timestamp column for {symbol} is not datetime. Attempting conversion.")
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+                    df.dropna(subset=['timestamp'], inplace=True) # Drop rows where timestamp conversion failed
+
                 for _, row in df.iterrows():
-                    # Ensure timestamp is datetime object
-                    ts = pd.to_datetime(row['timestamp'])
+                    ts = row['timestamp'] # Already a datetime object from standardize_data
                     
+                    # Ensure ts is a Python datetime object, not just pandas.Timestamp for defaultdict key
+                    if isinstance(ts, pd.Timestamp):
+                        ts = ts.to_pydatetime()
+
                     candle = Candle(
                         timestamp=ts,
-                        symbol=symbol, # Use the current symbol in loop
+                        symbol=symbol,
                         open=row['open'],
                         high=row['high'],
                         low=row['low'],
                         close=row['close'],
                         volume=int(row['volume']) if 'volume' in row and pd.notna(row['volume']) else 0,
-                        timeframe=timeframe_enum
+                        timeframe=timeframe_enum_val # Use the mapped Timeframe enum
                     )
                     all_candles_by_timestamp[ts][symbol] = candle
             else:
-                print(f"No data fetched for symbol: {symbol}")
+                print(f"HistoricalDataManager (get_all_data): No data fetched for symbol: {symbol}")
 
-        # Sort by timestamp
         sorted_timestamps = sorted(all_candles_by_timestamp.keys())
-        
-        # Prepare the final list of tuples
         result = [(ts, all_candles_by_timestamp[ts]) for ts in sorted_timestamps]
         
-        print(f"Processed and sorted data for {len(symbols)} symbols. Returning {len(result)} timestamp entries.")
+        print(f"HistoricalDataManager (get_all_data): Processed and sorted data for {len(symbols)} symbols. Returning {len(result)} timestamp entries.")
         return result
 
-# Example Usage (can be removed or commented out for production)
+# Example Usage (to be updated for new constructor and methods)
 if __name__ == '__main__':
-    # This example assumes fyers_client.py is in the accessible python path (e.g. same directory or installed)
-    # For the full framework, imports will be relative to the algo_trading_framework.src
+    from .csv_data_source import CSVDataSource # For example
+    import os
     
-    # Need to make sure MockFyersClient can be imported.
-    # This might require adjusting PYTHONPATH if running this script directly
-    # or placing a copy of fyers_client.py (or a simplified version) in the same directory for this test.
+    # Setup: Create a dummy CSV file for the example
+    # This setup would typically be part of a test suite or example script.
     
-    # Simplified MockFyersClient for direct script execution if full import fails
-    class StandaloneMockFyersClient(_ActualMockFyersClientClass): # Inherit from the actual mock client class or placeholder
-        def __init__(self, client_id, token, **kwargs):
-            super().__init__(client_id, token, **kwargs) # Call parent constructor
-            self.is_connected = False; print("StandaloneMockFyersClient used.") # Corrected attribute name
-        def connect(self): self.is_connected = True; print("StandaloneMock connected."); return True # Corrected attribute name
-        def get_historical_data(self, symbol, timeframe, start_date, end_date):
-            if not self.is_connected: return None # Corrected attribute name
-            print(f"StandaloneMock fetching {symbol} {timeframe} from {start_date} to {end_date}")
-            dates = pd.date_range(start_date, end_date, freq='D')
-            if not len(dates): return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'symbol', 'timeframe'])
-            return pd.DataFrame({
-                'timestamp': dates,
-                'open': [100 + i for i in range(len(dates))],
-                'high': [105 + i for i in range(len(dates))],
-                'low': [95 + i for i in range(len(dates))],
-                'close': [102 + i for i in range(len(dates))],
-                'volume': [1000 + i*10 for i in range(len(dates))],
-                'symbol': symbol,
-                'timeframe': timeframe
-            })
+    # Create a temporary directory for CSV data if it doesn't exist
+    temp_csv_dir = "temp_csv_data_for_hdm_example"
+    os.makedirs(temp_csv_dir, exist_ok=True)
+    
+    # Create a dummy CSV file: INFY-EQ_1D.csv
+    dummy_symbol = "INFY-EQ"
+    dummy_timeframe = "1D"
+    dummy_file_path = os.path.join(temp_csv_dir, f"{dummy_symbol}_{dummy_timeframe}.csv")
+    
+    # Sample data for the CSV
+    sample_dates = pd.to_datetime([datetime(2023, 1, 15), datetime(2023, 1, 16), datetime(2023, 1, 17)])
+    sample_data_dict = {
+        'timestamp': sample_dates,
+        'open': [300, 305, 310],
+        'high': [310, 315, 320],
+        'low': [290, 295, 300],
+        'close': [305, 310, 315],
+        'volume': [10000, 11000, 12000]
+    }
+    dummy_df = pd.DataFrame(sample_data_dict)
+    dummy_df.to_csv(dummy_file_path, index=False)
+    print(f"Example Usage: Created dummy CSV file at {dummy_file_path}")
 
-    client_to_use: MockFyersClientInstance = None
-    if _ActualMockFyersClientClass is not _MockFyersClientPlaceholder:
-        try:
-            client_to_use = _ActualMockFyersClientClass(client_id="test_hd_client", token="test_hd_token")
-            # Attempt to connect the full client if it initializes
-            if client_to_use and hasattr(client_to_use, 'connect'):
-                 client_to_use.connect()
-        except Exception as e:
-            print(f"Could not instantiate or connect full MockFyersClient: {e}. Falling back to standalone mock.")
-            client_to_use = StandaloneMockFyersClient(client_id="test_hd_client", token="test_hd_token")
-            if client_to_use: # Ensure client_to_use is not None before connecting
-                client_to_use.connect() # Connect the standalone mock
+    # 1. Initialize components
+    factory = DataSourceFactory()
+    cache = DataCache(max_size=10) # Example cache with max size
+    
+    # Provide necessary kwargs for the default CSV source
+    hdm_source_kwargs = {'csv_directory_path': temp_csv_dir}
+    
+    data_manager = HistoricalDataManager(
+        data_source_factory=factory, 
+        data_cache=cache,
+        default_source_type="CSV", # Explicitly set, though it's the default in constructor
+        default_source_kwargs=hdm_source_kwargs
+    )
+
+    # 2. Parameters for data fetching
+    symbol_to_fetch = dummy_symbol # "INFY-EQ"
+    timeframe_to_fetch = dummy_timeframe # "1D"
+    start_dt = datetime(2023, 1, 15) # Inclusive
+    end_dt = datetime(2023, 1, 16)   # Inclusive
+    
+    # 3. Fetch single historical data
+    print(f"\nExample Usage: Fetching single historical data for {symbol_to_fetch}...")
+    historical_data_df = data_manager.fetch_historical_data(
+        symbol_to_fetch, timeframe_to_fetch, start_dt, end_dt
+    )
+
+    if historical_data_df is not None and not historical_data_df.empty:
+        print(f"\nSuccessfully fetched data for {symbol_to_fetch} via new HDM:")
+        print(historical_data_df)
     else:
-        client_to_use = StandaloneMockFyersClient(client_id="test_hd_client", token="test_hd_token")
-        if client_to_use: # Ensure client_to_use is not None before connecting
-            client_to_use.connect() # Connect the standalone mock
+        print(f"\nFailed to fetch data or no data found for {symbol_to_fetch} via new HDM.")
 
-    # Check connection status consistently
-    connected_successfully = False
-    if client_to_use and hasattr(client_to_use, 'is_connected') and client_to_use.is_connected:
-        connected_successfully = True
-    
-    if connected_successfully:
-        data_manager = HistoricalDataManager(broker_client=client_to_use)
+    # 4. Fetch again (should hit cache)
+    print(f"\nExample Usage: Fetching same data again for {symbol_to_fetch} (should hit cache)...")
+    historical_data_df_cached = data_manager.fetch_historical_data(
+        symbol_to_fetch, timeframe_to_fetch, start_dt, end_dt
+    )
+    if historical_data_df_cached is not None:
+        print("Cached version:")
+        print(historical_data_df_cached)
         
-        symbol_to_fetch = "INFY-EQ"
-        start_dt = datetime(2023, 1, 15)
-        end_dt = datetime(2023, 1, 20)
-        tf = "1D"
+    # 5. Fetch data for multiple symbols (get_all_data_sorted_by_timestamp)
+    # Create another dummy CSV for a second symbol
+    dummy_symbol_2 = "REL-EQ"
+    dummy_file_path_2 = os.path.join(temp_csv_dir, f"{dummy_symbol_2}_{dummy_timeframe}.csv")
+    sample_dates_2 = pd.to_datetime([datetime(2023, 1, 15), datetime(2023, 1, 16)])
+    sample_data_dict_2 = {
+        'timestamp': sample_dates_2,
+        'open': [2500, 2510], 'high': [2520, 2530], 'low': [2480, 2490],
+        'close': [2510, 2520], 'volume': [50000, 55000]
+    }
+    dummy_df_2 = pd.DataFrame(sample_data_dict_2)
+    dummy_df_2.to_csv(dummy_file_path_2, index=False)
+    print(f"Example Usage: Created dummy CSV file at {dummy_file_path_2}")
+    
+    print(f"\nExample Usage: Fetching all data sorted for symbols [{symbol_to_fetch}, {dummy_symbol_2}]...")
+    all_sorted_data = data_manager.get_all_data_sorted_by_timestamp(
+        symbols=[symbol_to_fetch, dummy_symbol_2],
+        timeframe=timeframe_to_fetch,
+        start_date=datetime(2023, 1, 1,0,0,0), # Wider range to get all data from files
+        end_date=datetime(2023, 1, 30,0,0,0)
+    )
 
-        historical_data = data_manager.fetch_historical_data(symbol_to_fetch, tf, start_dt, end_dt)
-
-        if historical_data is not None:
-            print(f"\nSuccessfully fetched data for {symbol_to_fetch} via HistoricalDataManager:")
-            print(historical_data.head())
-        else:
-            print(f"\nFailed to fetch data for {symbol_to_fetch} via HistoricalDataManager.")
+    if all_sorted_data:
+        print("\nSuccessfully fetched and sorted data for multiple symbols:")
+        for ts, candle_dict in all_sorted_data:
+            print(f"Timestamp: {ts}")
+            for sym, candle_obj in candle_dict.items():
+                print(f"  {sym}: O={candle_obj.open}, H={candle_obj.high}, L={candle_obj.low}, C={candle_obj.close}, V={candle_obj.volume}, TF={candle_obj.timeframe}")
     else:
-        print("Could not connect mock client for HistoricalDataManager example.")
+        print("\nFailed to fetch or no data found for multiple symbols.")
+        
+    # Clean up dummy CSV files and directory
+    try:
+        os.remove(dummy_file_path)
+        os.remove(dummy_file_path_2)
+        os.rmdir(temp_csv_dir)
+        print("\nExample Usage: Cleaned up dummy CSV files and directory.")
+    except OSError as e:
+        print(f"\nExample Usage: Error cleaning up dummy files: {e}")
